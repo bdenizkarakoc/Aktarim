@@ -148,3 +148,32 @@ def test_powershell_port_and_folders():
     assert "'/api/ping'" in text and "NotifyIcon" in text
     vbs = (PS1.parent / "Aktarim.vbs").read_bytes()
     assert vbs.isascii() and b"Aktarim.ps1" in vbs
+
+
+@pytest.mark.skipif(not __import__("shutil").which("openssl"), reason="openssl yok")
+def test_https_same_port(store):
+    import ssl
+    srv = aktarim.make_server(store, host="127.0.0.1", port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    key = {"X-Aktarim-Key": store.cfg["token"]}
+    try:
+        der = urllib.request.urlopen(f"http://127.0.0.1:{port}/aktarim-ca.cer").read()
+        assert der[:1] == b"\x30"  # DER
+        ctx = ssl.create_default_context(cafile=str(store.root / ".sertifika" / "ca.pem"))
+        r = urllib.request.urlopen(urllib.request.Request(f"https://127.0.0.1:{port}/api/info", headers=key), context=ctx)
+        info = json.loads(r.read())
+        assert info["secure"] is True and info["ca"] == "/aktarim-ca.cer"
+        info = json.loads(urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{port}/api/info", headers=key)).read())
+        assert info["secure"] is False and info["https_urls"][0].startswith("https://")
+    finally:
+        srv.shutdown()
+        srv.server_close()
+
+
+def test_powershell_https_and_gallery():
+    text = PS1.read_bytes().decode("utf-8-sig")
+    assert "'/aktarim-ca.cer'" in text and "SslStream" in text and "New-SelfSignedCertificate" in text
+    assert "https_urls" in text and "filename=`\"$asciiName`\"" in text
+    app = (PS1.parent / "web" / "app.js").read_text("utf-8")
+    assert "navigator.share({ files })" in app and "Galeri'ye" in app

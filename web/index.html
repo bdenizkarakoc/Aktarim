@@ -62,6 +62,12 @@
         <div class="segmented" data-filter="inbox"></div>
         <div class="tools" id="inbox-tools"></div>
       </div>
+      <div class="card banner" id="photos-banner" hidden>
+        <span class="ic-badge" data-icon="photo"></span>
+        <div><b>Fotoğrafları tek dokunuşla Fotoğraflar'a kaydet</b>
+          <span>iPhone bunun için bir kez güvenli bağlantı kurulmasını istiyor (1 dakika).</span></div>
+        <button class="btn primary small" id="banner-go">Kur</button>
+      </div>
       <div class="cards" id="inbox"></div>
       <div class="empty" id="inbox-empty"><div class="art" data-art="inbox"></div>
         <b>Henüz bir şey gelmedi</b><span id="inbox-empty-sub"></span></div>
@@ -88,6 +94,19 @@
       <div class="empty" id="bin-empty"><div class="art" data-art="bin"></div><b>Sonradan Sil kutusu boş</b>
         <span>Bir öğede “Sonradan sil”i seçince buraya gelir.</span></div>
       <button class="btn danger" id="empty-bin" hidden>Kutuyu şimdi boşalt</button>
+    </section>
+
+    <!-- iPHONE: FOTOĞRAFLAR'A KAYDETME KURULUMU -->
+    <section class="page" data-page="setup" hidden>
+      <div class="steps">
+        <div class="step"><span>1</span><div><b>Sertifikayı indir</b>Aşağıdaki düğmeye dokun, çıkan soruda <b>İzin Ver</b>, sonra <b>Kapat</b>.
+          <a class="btn primary" id="setup-ca" href="/aktarim-ca.cer">Sertifikayı indir</a></div></div>
+        <div class="step"><span>2</span><div><b>Profili yükle</b><b>Ayarlar</b>'ı aç → en üstte <b>Profil İndirildi</b> → <b>Yükle</b> (iPhone şifren) → <b>Yükle</b> → <b>Bitti</b>.</div></div>
+        <div class="step"><span>3</span><div><b>Sertifikaya güven</b><b>Ayarlar → Genel → Hakkında</b> → en altta <b>Sertifika Güven Ayarları</b> → <b>Aktarim Yerel CA</b>'yı aç → <b>Devam</b>.</div></div>
+        <div class="step"><span>4</span><div><b>Güvenli bağlantıya geç</b>Aktarım güvenli bağlantıyla yeniden açılır. Ana ekrana eklediysen eski simgeyi silip bu sayfadan yeniden <b>Ana Ekrana Ekle</b>.
+          <button class="btn primary" id="setup-go">Güvenli bağlantıya geç</button></div></div>
+        <p class="note-small">Sonra Gelenler'de <b>Kaydet</b>'e dokun → <b>Görüntüyü Kaydet</b> / <b>Videoyu Kaydet</b>: fotoğraf ve video doğrudan Fotoğraflar'a iner. Bu sertifika yalnızca Aktarım için, yalnızca evdeki ağda kullanılır.</p>
+      </div>
     </section>
 
     <!-- BAĞLAN -->

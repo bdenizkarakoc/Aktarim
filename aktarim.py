@@ -24,6 +24,8 @@ import re
 import secrets
 import shutil
 import socket
+import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -342,6 +344,7 @@ class Store:
 # HTTP
 # ---------------------------------------------------------------------------
 
+CA_PATH = "/aktarim-ca.cer"
 STATIC = {"/": "index.html", "/app.js": "app.js", "/style.css": "style.css",
           "/manifest.webmanifest": "manifest.webmanifest", "/icon.svg": "icon.svg"}
 
@@ -350,6 +353,8 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "Aktarim/1.0"
     store: Store = None  # type: ignore[assignment]
     urls: list[str] = []
+    https_urls: list[str] = []
+    ca_der: str | None = None
 
     def log_message(self, fmt, *args):  # sessiz çalış
         if os.environ.get("AKTARIM_LOG"):
@@ -397,7 +402,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
         if path == "/api/ping":
-            return self._json({"app": "aktarim", "version": 2})
+            return self._json({"app": "aktarim", "version": 3})
+        if path == CA_PATH and self.ca_der:
+            return self._send_ca()
         if path in STATIC:
             if path == "/" and not self._token_ok():
                 return self._locked_page()
@@ -408,7 +415,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/items":
             return self._json(self.store.listing())
         if path == "/api/info":
-            return self._json({"urls": self.urls, "token": self.store.cfg["token"],
+            return self._json({"urls": self.urls, "https_urls": self.https_urls,
+                               "token": self.store.cfg["token"], "secure": self.secure,
+                               "ca": CA_PATH if self.ca_der else None,
                                "device": self.source, "data_dir": str(self.store.root),
                                "local": self.is_local})
         if path == "/api/version":
@@ -417,6 +426,20 @@ class Handler(BaseHTTPRequestHandler):
         if m:
             return self._send_file(m.group(1))
         return self._error(404, "bulunamadı")
+
+    @property
+    def secure(self) -> bool:
+        return isinstance(self.connection, ssl.SSLSocket)
+
+    def _send_ca(self) -> None:
+        """Yerel kök sertifika: iPhone'a bir kez yüklenince https (ve Fotoğraflar'a kaydetme) çalışır."""
+        data = Path(self.ca_der).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-x509-ca-cert")
+        self.send_header("Content-Disposition", 'attachment; filename="Aktarim.cer"')
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _locked_page(self) -> None:
         body = ("<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
@@ -480,7 +503,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(end - start + 1 if size else 0))
         if status == 206:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Content-Disposition", f"{disp}; filename*=UTF-8''{quoted}")
+        ascii_name = re.sub(r'[^\x20-\x7e]', "_", item["name"]).replace('"', "_")
+        self.send_header("Content-Disposition", f"{disp}; filename=\"{ascii_name}\"; filename*=UTF-8''{quoted}")
         self.send_header("Cache-Control", "private, max-age=3600")
         self.end_headers()
         if self.command == "HEAD" or not size:
@@ -580,12 +604,77 @@ def port_busy(port: int) -> bool:
         return False
 
 
-def make_server(store: Store, host="0.0.0.0", port=DEFAULT_PORT) -> ThreadingHTTPServer:
+def ensure_certs(folder: Path, ips: list[str]) -> dict | None:
+    """Yerel kök sertifika (CA) ve bu bilgisayarın IP'leri için sunucu sertifikası üretir (openssl ile).
+
+    iPhone'da sayfanın fotoğrafı doğrudan Fotoğraflar'a kaydedebilmesi (paylaşım menüsü) güvenli bağlantı
+    (https) ister; CA telefona bir kez yüklenip güvenilince bu sertifika geçerli sayılır."""
+    exe = shutil.which("openssl")
+    if not exe:
+        return None
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    ca_key, ca_pem, ca_der = folder / "ca.key", folder / "ca.pem", folder / "Aktarim.cer"
+    key, crt, sans_file = folder / "sunucu.key", folder / "sunucu.pem", folder / "sunucu.san"
+    want = ",".join(sorted({f"IP:{ip}" for ip in ips} | {"IP:127.0.0.1", "DNS:localhost"}))
+    run = lambda *a: subprocess.run([exe, *a], check=True, capture_output=True)  # noqa: E731
+    try:
+        if not ca_pem.exists() or not ca_key.exists():
+            run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "3650",
+                "-keyout", str(ca_key), "-out", str(ca_pem), "-subj", "/CN=Aktarim Yerel CA",
+                "-addext", "basicConstraints=critical,CA:TRUE,pathlen:0",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+            crt.unlink(missing_ok=True)
+        if not ca_der.exists():
+            run("x509", "-in", str(ca_pem), "-outform", "der", "-out", str(ca_der))
+        if not crt.exists() or not sans_file.exists() or sans_file.read_text() != want:
+            csr, ext = folder / "sunucu.csr", folder / "sunucu.ext"
+            ext.write_text(f"subjectAltName={want}\nbasicConstraints=CA:FALSE\n"
+                           "keyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n")
+            run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(csr), "-subj", "/CN=Aktarim")
+            run("x509", "-req", "-in", str(csr), "-CA", str(ca_pem), "-CAkey", str(ca_key), "-CAcreateserial",
+                "-out", str(crt), "-days", "800", "-sha256", "-extfile", str(ext))
+            sans_file.write_text(want)
+            csr.unlink(missing_ok=True)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {"ca_der": str(ca_der), "ca_pem": str(ca_pem), "cert": str(crt), "key": str(key)}
+
+
+class AktarimServer(ThreadingHTTPServer):
+    """Aynı kapıda hem http hem https: ilk bayt TLS el sıkışmasıysa (0x16) bağlantı şifrelenir."""
+    daemon_threads = True
+    ssl_ctx: ssl.SSLContext | None = None
+
+    def process_request_thread(self, request, client_address):
+        if self.ssl_ctx is not None:
+            try:
+                request.settimeout(30)
+                first = request.recv(1, socket.MSG_PEEK)
+                if first == b"\x16":
+                    request = self.ssl_ctx.wrap_socket(request, server_side=True)
+                request.settimeout(None)
+            except (OSError, ssl.SSLError):
+                self.shutdown_request(request)
+                return
+        super().process_request_thread(request, client_address)
+
+
+def make_server(store: Store, host="0.0.0.0", port=DEFAULT_PORT, tls: bool = True) -> ThreadingHTTPServer:
     handler = type("BoundHandler", (Handler,), {"store": store})
-    srv = ThreadingHTTPServer((host, port), handler)
-    srv.daemon_threads = True
+    srv = AktarimServer((host, port), handler)
     real_port = srv.server_address[1]
-    handler.urls = [f"http://{ip}:{real_port}/?k={store.cfg['token']}" for ip in local_ips()]
+    ips = local_ips()
+    token = store.cfg["token"]
+    handler.urls = [f"http://{ip}:{real_port}/?k={token}" for ip in ips]
+    certs = ensure_certs(store.root / ".sertifika", ips) if tls else None
+    if certs:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(certs["cert"], certs["key"])
+        srv.ssl_ctx = ctx
+        handler.ca_der = certs["ca_der"]
+        handler.https_urls = [f"https://{ip}:{real_port}/?k={token}" for ip in ips]
     return srv
 
 

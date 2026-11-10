@@ -407,8 +407,11 @@ function Send-FileItem($S, $Out, $Req, [string]$Id) {
     $disp = 'inline'; if ($Req.Query['dl']) { $disp = 'attachment' }
     $len = [long]0; if ($size -gt 0) { $len = $end - $start + 1 }
     $mime = $it.mime; if (-not $mime) { $mime = 'application/octet-stream' }
+    $asciiName = (([string]$it.name) -replace '[^\x20-\x7e]', '_') -replace '"', '_'
+    $encName = [Uri]::EscapeDataString([string]$it.name)
     $h = @{ 'Content-Type' = $mime; 'Accept-Ranges' = 'bytes'; 'Content-Length' = $len;
-            'Content-Disposition' = "$disp; filename*=UTF-8''$([Uri]::EscapeDataString($it.name))"; 'Cache-Control' = 'private, max-age=3600' }
+            'Content-Disposition' = "$disp; filename=`"$asciiName`"; filename*=UTF-8''$encName";
+            'Cache-Control' = 'private, max-age=3600' }
     if ($status -eq 206) { $h['Content-Range'] = "bytes $start-$end/$size" }
     Send-Bytes $Out $status $reason $h $null
     if ($Req.Method -eq 'HEAD' -or $len -eq 0) { return }
@@ -430,7 +433,10 @@ function Invoke-Route($S, $Req, $In, $Out) {
   $path = $Req.Path
   $src = Get-Device $Req.Headers['user-agent']
   if ($Req.Method -eq 'GET' -or $Req.Method -eq 'HEAD') {
-    if ($path -eq '/api/ping') { return Send-Json $Out @{ app = 'aktarim'; version = 2 } }
+    if ($path -eq '/api/ping') { return Send-Json $Out @{ app = 'aktarim'; version = 3 } }
+    if ($path -eq '/aktarim-ca.cer' -and $S.CaDer) {
+      return Send-Bytes $Out 200 'OK' @{ 'Content-Type' = 'application/x-x509-ca-cert'; 'Content-Disposition' = 'attachment; filename="Aktarim.cer"' } ([byte[]]$S.CaDer)
+    }
     if ($Static.ContainsKey($path)) {
       if ($path -eq '/' -and -not (Test-Token $S $Req)) { return Send-Locked $Out }
       return Send-Static $S $Out $Static[$path] ($path -eq '/')
@@ -442,7 +448,11 @@ function Invoke-Route($S, $Req, $In, $Out) {
       return Send-Bytes $Out 200 'OK' @{ 'Content-Type' = 'application/json; charset=utf-8'; 'Cache-Control' = 'no-store' } ($Utf8.GetBytes($json))
     }
     if ($path -eq '/api/version') { return Send-Json $Out @{ version = [int]$S.Version } }
-    if ($path -eq '/api/info') { return Send-Json $Out @{ urls = @($S.Urls); token = $S.Cfg.token; device = $src; data_dir = $S.Root; local = [bool]$Req.Local } }
+    if ($path -eq '/api/info') {
+      $ca = $null; if ($S.CaDer) { $ca = '/aktarim-ca.cer' }
+      return Send-Json $Out @{ urls = @($S.Urls); https_urls = @($S.HttpsUrls); token = $S.Cfg.token; secure = [bool]$Req.Secure; ca = $ca
+                               device = $src; data_dir = $S.Root; local = [bool]$Req.Local }
+    }
     if ($path -match '^/api/file/([0-9a-f]{12})(/.*)?$') { return Send-FileItem $S $Out $Req $Matches[1] }
     return Send-Error $Out 404 'bulunamadı'
   }
@@ -497,13 +507,26 @@ function Invoke-Client($Client, $S) {
     $Client.ReceiveTimeout = 30000
     $Client.SendTimeout = 60000
     $ns = $Client.GetStream()
-    $in = New-Object IO.BufferedStream($ns, 65536)
+    $io = $ns
+    $secure = $false
+    if ($S.Cert) {
+      # aynı kapıda https: ilk bayt TLS el sıkışmasıysa (0x16) bağlantıyı şifrele
+      $peek = New-Object byte[] 1
+      $got = $Client.Client.Receive($peek, 0, 1, [Net.Sockets.SocketFlags]::Peek)
+      if ($got -eq 1 -and $peek[0] -eq 0x16) {
+        $ssl = New-Object Net.Security.SslStream($ns, $false)
+        $ssl.AuthenticateAsServer($S.Cert, $false, [Security.Authentication.SslProtocols]::Tls12, $false)
+        $io = $ssl; $secure = $true
+      }
+    }
+    $in = New-Object IO.BufferedStream($io, 65536)
     $req = Read-Request $in
     if ($req) {
       $req.Local = [Net.IPAddress]::IsLoopback($Client.Client.RemoteEndPoint.Address)
-      Invoke-Route $S $req $in $ns
+      $req.Secure = $secure
+      Invoke-Route $S $req $in $io
     }
-    $ns.Flush()
+    $io.Flush()
   } catch {
   } finally {
     $Client.Close()
@@ -540,6 +563,39 @@ function Get-LocalIPs {
   } catch {}
   if ($ips.Count -eq 0) { $ips.Add('127.0.0.1') }
   $ips
+}
+
+# Yerel kök sertifika (CA) + bu bilgisayarın IP'leri için sunucu sertifikası (Windows sertifika deposunda).
+# iPhone'da sayfanın fotoğrafı doğrudan Fotoğraflar'a kaydedebilmesi güvenli bağlantı (https) ister;
+# CA telefona bir kez yüklenip güvenilince bu sertifika geçerli sayılır.
+function Get-AktarimCerts([string[]]$Ips) {
+  $store = 'Cert:\CurrentUser\My'
+  $soon = (Get-Date).AddDays(30)
+  $ca = Get-ChildItem $store | Where-Object { $_.FriendlyName -eq 'Aktarim Yerel CA' -and $_.HasPrivateKey -and $_.NotAfter -gt $soon } |
+        Select-Object -First 1
+  if (-not $ca) {
+    $ca = New-SelfSignedCertificate -Subject 'CN=Aktarim Yerel CA' -FriendlyName 'Aktarim Yerel CA' -CertStoreLocation $store `
+      -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(10) -KeyExportPolicy Exportable `
+      -KeyUsage CertSign, CRLSign, DigitalSignature -TextExtension @('2.5.29.19={critical}{text}ca=1&pathlength=0')
+  }
+  $want = @($Ips) + @('127.0.0.1')
+  $srv = $null
+  foreach ($c in @(Get-ChildItem $store | Where-Object { $_.FriendlyName -eq 'Aktarim Sunucu' -and $_.HasPrivateKey -and $_.NotAfter -gt $soon -and $_.Issuer -eq $ca.Subject })) {
+    $sanExt = $c.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' } | Select-Object -First 1
+    if (-not $sanExt) { continue }
+    $san = $sanExt.Format($false)
+    $ok = $true
+    foreach ($ip in $want) { if ($san -notmatch ('(^|[^0-9.])' + [regex]::Escape($ip) + '($|[^0-9.])')) { $ok = $false } }
+    if ($ok) { $srv = $c; break }
+  }
+  if (-not $srv) {
+    Get-ChildItem $store | Where-Object { $_.FriendlyName -eq 'Aktarim Sunucu' } | Remove-Item -Force -ErrorAction SilentlyContinue
+    $sanText = '2.5.29.17={text}DNS=localhost&' + (($want | ForEach-Object { "IPAddress=$_" }) -join '&')
+    $srv = New-SelfSignedCertificate -Subject 'CN=Aktarim' -FriendlyName 'Aktarim Sunucu' -CertStoreLocation $store -Signer $ca `
+      -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(800) `
+      -KeyUsage DigitalSignature, KeyEncipherment -TextExtension @($sanText, '2.5.29.37={text}1.3.6.1.5.5.7.3.1', '2.5.29.19={text}ca=0')
+  }
+  @{ CA = $ca; Server = $srv }
 }
 
 function Test-OurServer([int]$P) {
@@ -673,7 +729,16 @@ foreach ($p in $start..($start + 9)) {
 if (-not $listener) { throw "Boş bir kapı bulunamadı ($start-$($start + 9))." }
 $Port = $listener.LocalEndpoint.Port
 if ([int]$S.Cfg.port -ne $Port) { $S.Cfg.port = $Port; Write-JsonFile $S.CfgPath $S.Cfg }
-$S.Urls = @(Get-LocalIPs | ForEach-Object { "http://${_}:$Port/?k=$($S.Cfg.token)" })
+$ips = @(Get-LocalIPs)
+$S.Urls = @($ips | ForEach-Object { "http://${_}:$Port/?k=$($S.Cfg.token)" })
+$S.HttpsUrls = @()
+$S.Cert = $null
+try {
+  $certs = Get-AktarimCerts $ips
+  $S.Cert = $certs.Server
+  $S.CaDer = $certs.CA.RawData
+  $S.HttpsUrls = @($ips | ForEach-Object { "https://${_}:$Port/?k=$($S.Cfg.token)" })
+} catch { $S.Cert = $null }
 $local = "http://127.0.0.1:$Port/?k=$($S.Cfg.token)"
 
 $pool = [RunspaceFactory]::CreateRunspacePool(1, 16)

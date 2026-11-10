@@ -58,10 +58,19 @@ Güncellemek için aynı satırı yeniden çalıştırman yeterli.
 
 **Bağlanmıyorsa:** Windows'ta Wi-Fi ağının **Özel** ağ olarak ayarlı olduğundan emin ol (Ayarlar → Ağ ve İnternet → Wi-Fi → ağ adı → *Özel ağ*).
 
+## Fotoğraf ve videolar doğrudan galeriye
+
+- **Samsung / Android:** Gelenler'de **Galeriye**'ye dokun (ya da *Hepsini Galeri'ye kaydet*); fotoğraf ve video
+  **Galeri → İndirilenler** albümüne iner.
+- **iPhone:** Gelenler'de **Kaydet** → **Görüntüyü Kaydet / Videoyu Kaydet**: doğrudan **Fotoğraflar**'a (Film Rulosu) iner;
+  *Hepsini Fotoğraflar'a kaydet* ile hepsi birden. iPhone bunu yalnızca güvenli bağlantıda yaptığı için ilk seferde
+  Aktarım 1 dakikalık bir kurulum gösterir: sertifikayı indir → Ayarlar'da **Profil İndirildi → Yükle** →
+  **Genel → Hakkında → Sertifika Güven Ayarları → Aktarim Yerel CA**'yı aç. Sonra Aktarım kendiliğinden güvenli
+  bağlantıya geçer. (Sertifika bu bilgisayarda üretilir, yalnızca Aktarım için ve yalnızca evdeki ağda kullanılır.)
+
 ## Bilmen gerekenler
 
 - Her şey yalnızca evdeki ağda kalır, internete bir şey yüklenmez. QR koddaki bağlantı gizli bir anahtar içerir; o bağlantı olmadan kimse göremez.
-- iPhone'da fotoğrafı kaydetmek için öğede **Kaydet**'e dokun; açılan görsele basılı tutup **Fotoğraflara Ekle**'yi seç.
 - AirDrop yalnızca Apple cihazları arasında çalıştığı için Aktarım telefonda tarayıcı üzerinden çalışır; böylece iPhone'da da Samsung'da da aynıdır.
 - Aktarım kendi kapısını (47800) kullanır; bilgisayardaki başka programlarla (ör. Reels Fabrikası) karışmaz.
 

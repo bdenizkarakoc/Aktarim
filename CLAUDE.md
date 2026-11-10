@@ -14,4 +14,7 @@ Bilgisayar ↔ telefon (iPhone/Samsung) dosya, fotoğraf, video, belge ve yazı 
 - Dosyalar gerçek adlarıyla `Gelenler/`, `Gönderilenler/`, `Sonradan Sil/` klasörlerinde; `item.file` köke göreli.
 - "Sonradan Sil": 7 / 14 / 30 gün, geri yüklenebilir, süre dolunca kalıcı silinir.
 - `/api/reveal`, `/api/open-folder` yalnızca 127.0.0.1'den.
+- Aynı kapıda http + https (ilk bayt 0x16 → TLS). Yerel CA (`/aktarim-ca.cer`, PS: `Cert:\CurrentUser\My`, Python:
+  openssl ile `.sertifika/`), sunucu sertifikası ≤825 gün + SAN IP'ler (iOS kuralı). iPhone'da Fotoğraflar'a kaydetme
+  `navigator.share({files})` ister: güvenli bağlantı + dokunuştan hemen sonra çağrı (dosyalar önceden alınır).
 - API değişirse iki sunucuyu birlikte güncelle; testler: `python -m pytest tests -q`.

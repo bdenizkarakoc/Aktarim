@@ -91,6 +91,7 @@ const TABS = [
   { id: "sent", label: "Gönderdiklerim", icon: "plane" },
   { id: "bin", label: "Sonradan Sil", icon: "trash" },
   { id: "connect", label: "Telefon Bağla", icon: "qr", pc: true },
+  { id: "setup", label: "Fotoğraflar'a kaydet", icon: "photo", hidden: true },
 ];
 const other = () => (isMobile ? "bilgisayar" : "telefon");
 const LEADS = {
@@ -99,6 +100,7 @@ const LEADS = {
   sent: () => `${isMobile ? "Bilgisayara" : "Telefona"} gönderdiklerin.`,
   bin: () => "",
   connect: () => "Telefonunu bu bilgisayara bağla.",
+  setup: () => "Bir kez kur; sonra fotoğraf ve videolar tek dokunuşla Fotoğraflar'a iner.",
 };
 
 // ---------- yardımcılar ----------
@@ -166,7 +168,7 @@ const isUrl = (t) => /^https?:\/\/\S+$/.test((t || "").trim());
 function buildNav() {
   const side = $("#side-nav"), bar = $("#tabbar");
   side.replaceChildren(); bar.replaceChildren();
-  TABS.forEach((t) => {
+  TABS.filter((t) => !t.hidden).forEach((t) => {
     const mk = () => {
       const b = el("button");
       b.dataset.tab = t.id;
@@ -268,14 +270,64 @@ function download(it) {
   a.remove();
   if (isIOS) toast("İndirilenler → Dosyalar uygulamasında");
 }
-async function saveToPhotos(it) {
+// ---------- galeriye / Fotoğraflar'a kaydetme ----------
+// Samsung/Android: indirilen fotoğraf ve video Galeri'de (İndirilenler) görünür.
+// iPhone: Safari yalnızca güvenli bağlantıda (https) paylaşım menüsünü açar → "Görüntüyü/Videoyu Kaydet"
+// doğrudan Fotoğraflar'a kaydeder. Paylaşım dokunuşun hemen ardından çağrılmalı; bu yüzden dosyalar önceden alınır.
+const isMedia = (it) => it.kind === "file" && ["photo", "video"].includes(kind(it));
+const canShareFiles = () => window.isSecureContext && !!navigator.canShare;
+const mediaCache = new Map();
+let cacheBytes = 0, prefetching = false;
+const CACHE_MAX = 400 * 1024 * 1024;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function getFile(it) {
+  if (mediaCache.has(it.id)) return mediaCache.get(it.id);
+  const blob = await (await fetch(fileUrl(it))).blob();
+  const f = new File([blob], it.name, { type: it.mime || blob.type });
+  if (cacheBytes + f.size <= CACHE_MAX) { mediaCache.set(it.id, f); cacheBytes += f.size; }
+  return f;
+}
+async function prefetchMedia() {
+  if (!isIOS || !canShareFiles() || prefetching || !state.data) return;
+  prefetching = true;
   try {
-    const blob = await (await fetch(fileUrl(it))).blob();
-    const file = new File([blob], it.name, { type: it.mime });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
-  } catch (e) { if (e && e.name === "AbortError") return; }
-  openItem(it);
-  toast("Görsele basılı tut → “Fotoğraflara Ekle”");
+    for (const it of state.data.items.filter((i) => !mine(i) && isMedia(i))) {
+      if (!mediaCache.has(it.id) && cacheBytes + (it.size || 0) <= CACHE_MAX) await getFile(it).catch(() => null);
+    }
+  } finally { prefetching = false; }
+}
+function saveToPhotos(list) {
+  const items = [].concat(list).filter(isMedia);
+  if (!items.length) return;
+  if (isIOS) {
+    if (!canShareFiles()) return setTab("setup");
+    const missing = items.filter((i) => !mediaCache.has(i.id));
+    if (missing.length) {
+      toast(`Hazırlanıyor… (${missing.length})`);
+      Promise.all(missing.map(getFile)).then(() => toast("Hazır — “Kaydet”e yeniden dokun"), () => toast("Dosya alınamadı"));
+      return;
+    }
+    const files = items.map((i) => mediaCache.get(i.id));
+    if (!navigator.canShare({ files })) { toast("Bu dosya türü Fotoğraflar'a kaydedilemiyor"); return; }
+    navigator.share({ files }).catch((e) => { if (e.name !== "AbortError") toast("Kaydedilemedi: " + e.message); });
+    return;
+  }
+  (async () => {
+    for (const it of items) { download(it); await sleep(500); }
+    toast(items.length > 1 ? `${items.length} öğe Galeri'ye iniyor (İndirilenler)` : "Galeri'ye iniyor (İndirilenler albümü)");
+  })();
+}
+function secureUrl() {
+  const port = location.port ? ":" + location.port : "";
+  return `https://${location.hostname}${port}/?k=${encodeURIComponent((info && info.token) || "")}`;
+}
+// Sertifika telefona yüklenip güvenilmiş mi? (güvenilmemişse https isteği hata verir)
+async function httpsTrusted() {
+  if (location.protocol === "https:" || !(info && info.ca)) return false;
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 1500);
+  try { await fetch(`https://${location.hostname}:${location.port}/api/ping`, { mode: "no-cors", cache: "no-store", signal: ctl.signal }); return true; }
+  catch { return false; } finally { clearTimeout(t); }
 }
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); } catch {
@@ -322,7 +374,7 @@ function actionsFor(it) {
   } else {
     a.push(["eye", "Aç", () => openItem(it)]);
     if (state.local) a.push(["folder", "Klasörde", () => reveal(it)]);
-    else if (isIOS && (k === "photo" || k === "video")) a.push(["save", "Kaydet", () => saveToPhotos(it)]);
+    else if (isMobile && isMedia(it)) a.push(["save", isIOS ? "Kaydet" : "Galeriye", () => saveToPhotos(it)]);
     else a.push(["save", "İndir", () => download(it)]);
   }
   a.push(["trash", "Sil", () => laterMenu(it), true]);
@@ -419,6 +471,11 @@ function render() {
   const fi = incoming.filter((i) => matches(i, state.filters.inbox));
   const fo = outgoing.filter((i) => matches(i, state.filters.sent));
   $("#inbox").replaceChildren(...fi.map((i) => card(i, !seen.has(i.id))));
+  const media = fi.filter(isMedia);
+  const all = $("#save-all");
+  if (all) { all.hidden = media.length < 2; all.lastChild.textContent = `Hepsini ${isIOS ? "Fotoğraflar'a" : "Galeri'ye"} kaydet (${media.length})`; }
+  $("#photos-banner").hidden = !(isIOS && !canShareFiles() && info && info.ca && incoming.some(isMedia));
+  prefetchMedia();
   $("#inbox-empty").hidden = fi.length > 0;
   $("#sent").replaceChildren(...fo.map((i) => card(i, false)));
   $("#sent-empty").hidden = fo.length > 0;
@@ -634,6 +691,19 @@ async function init() {
   } else {
     $("#inbox-empty-sub").textContent = "Telefonda Aktarım'ı açıp Gönder'e dokun; gönderdiklerin burada görünür.";
   }
+  if (isMobile) {
+    const b = el("button", "btn soft small"); b.id = "save-all"; b.hidden = true;
+    b.append(icon("save"), el("span", "", ""));
+    b.addEventListener("click", () => saveToPhotos(state.data.items.filter((i) => !mine(i) && isMedia(i) && matches(i, state.filters.inbox))));
+    $("#inbox-tools").append(b);
+  }
+  $("#banner-go").addEventListener("click", () => setTab("setup"));
+  $("#setup-ca").href = (info && info.ca) || "/aktarim-ca.cer";
+  $("#setup-go").addEventListener("click", async () => {
+    if (await httpsTrusted()) location.href = secureUrl();
+    else toast("Önce 2. ve 3. adımı bitir (sertifikaya güven)");
+  });
+  if (isIOS && location.protocol === "http:" && await httpsTrusted()) { location.replace(secureUrl()); return; }
   if (state.local) {
     const b = el("button", "btn soft small"); b.append(icon("folder"), el("span", "", "Klasörü aç"));
     b.addEventListener("click", () => api("/api/open-folder", {}).catch((e) => toast(e.message)));
