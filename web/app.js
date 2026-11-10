@@ -113,12 +113,18 @@ async function api(path, body) {
   if (!r.ok) throw new Error(j.error || r.statusText);
   return j;
 }
-function toast(msg) {
+function toast(msg, action) {
   const t = $("#toast");
-  t.textContent = msg;
+  t.replaceChildren(el("span", "", msg));
+  t.classList.toggle("has-action", !!action);
+  if (action) {
+    const b = el("button", "", action[0]);
+    b.addEventListener("click", () => { t.classList.remove("show"); action[1](); });
+    t.append(b);
+  }
   t.classList.add("show");
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => t.classList.remove("show"), 2600);
+  toast.t = setTimeout(() => t.classList.remove("show"), action ? 6000 : 2600);
 }
 function size(n) {
   if (!n) return "0 B";
@@ -469,7 +475,7 @@ function actionsFor(it) {
     else if (isMobile && isMedia(it)) a.push(["save", isIOS ? "Kaydet" : "Galeriye", () => saveToPhotos(it)]);
     else a.push(["save", "İndir", () => download(it)]);
   }
-  a.push(["trash", "Sil", () => laterMenu(it), true]);
+  a.push(["trash", "Sil", () => quickDelete([it]), true]);
   return a;
 }
 function thumb(it) {
@@ -550,7 +556,7 @@ function albumActions(items) {
   if (state.local) a.push(["folder", "Klasörde", () => reveal(items[0])]);
   else if (isMobile && media.length) a.push(["save", isIOS ? "Hepsini kaydet" : "Galeriye", () => saveToPhotos(media)]);
   else a.push(["save", "Hepsini indir", () => downloadAll(items)]);
-  a.push(["trash", "Sil", () => albumLaterMenu(items), true]);
+  a.push(["trash", "Sil", () => quickDelete(items), true]);
   return a;
 }
 async function downloadAll(items) {
@@ -575,19 +581,55 @@ function albumLaterMenu(items) {
     ["Hemen kalıcı olarak sil", purgeAll, true],
   ]);
 }
+// Sil: soru sormadan Sonradan Sil'e taşır (varsayılan süreyle); süre Sonradan Sil ekranında seçilir.
+async function quickDelete(list) {
+  const items = [].concat(list);
+  for (const it of items) await api("/api/delete", { id: it.id });
+  const days = state.data ? state.data.retention_days : 14;
+  if (state.tab === "album" && items.length > 1) setTab(state.albumFrom || "inbox");
+  toast(`${items.length > 1 ? items.length + " öğe " : ""}Sonradan Sil'e taşındı · ${DAYS[days] || days + " gün"} sonra silinir`, ["Geri al", async () => {
+    for (const it of items) await api("/api/restore", { id: it.id });
+    toast("Geri alındı");
+    refresh(true);
+  }]);
+  refresh(true);
+}
+async function setDuration(items, days) {
+  for (const it of items) await api("/api/delete", { id: it.id, days });
+  toast(`${DAYS[days]} sonra silinecek`);
+  refresh(true);
+}
+async function restoreAll(items) {
+  for (const it of items) await api("/api/restore", { id: it.id });
+  toast(items.length > 1 ? `${items.length} öğe geri yüklendi` : "Geri yüklendi");
+  refresh(true);
+}
+async function purgeAll(items) {
+  const what = items.length > 1 ? `${items.length} öğe` : `“${items[0].name}”`;
+  if (!confirm(`${what} kalıcı olarak silinsin mi? Bu geri alınamaz.`)) return;
+  for (const it of items) await api("/api/purge", { id: it.id });
+  toast("Kalıcı olarak silindi");
+  refresh(true);
+}
+// Kolaj: 1–5 kare; daha fazlasında son karede "+N".
 function collage(items) {
   const t = el("button", "thumb album-thumb");
-  const pics = [...items.filter((i) => canShow(i) || kind(i) === "video"), ...items.filter((i) => !(canShow(i) || kind(i) === "video"))].slice(0, 4);
+  const ordered = [...items].sort((a, b) => a.created - b.created);
+  const visual = [...ordered.filter((i) => canShow(i) || kind(i) === "video"), ...ordered.filter((i) => !(canShow(i) || kind(i) === "video"))];
+  const pics = visual.slice(0, 5);
   const grid = el("div", "collage n" + pics.length);
-  pics.forEach((it) => {
+  const extra = items.length - pics.length;
+  pics.forEach((it, idx) => {
     const cell = el("span", "cell");
     if (canShow(it)) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = ""; cell.append(img); }
     else if (kind(it) === "video") {
       const v = el("video"); v.src = fileUrl(it) + "#t=0.5"; v.muted = true; v.playsInline = true; v.preload = "metadata"; cell.append(v);
     } else { const b = el("span", "ic-badge " + (COLOR[kind(it)] || "")); b.append(icon(ICON_OF[kind(it)] || "file")); cell.append(b); }
+    if (kind(it) === "video") { const pl = el("span", "mini-play"); pl.append(icon("play")); cell.append(pl); }
+    if (extra > 0 && idx === pics.length - 1) cell.append(el("span", "more-n", "+" + extra));
     grid.append(cell);
   });
-  const badge = el("span", "count"); badge.append(icon("folder"), el("span", "", String(items.length)));
+  const badge = el("span", "count"); badge.append(icon("photo"), el("span", "", String(items.length)));
   t.append(grid, badge);
   t.addEventListener("click", () => openAlbum(items[0].batch));
   return t;
@@ -633,28 +675,40 @@ function renderAlbum() {
   if (fromOther) setTimeout(() => { items.forEach((i) => seen.add(i.id)); store.set("seen", [...seen].slice(-2000)); }, 1500);
 }
 
-function binRow(it) {
-  const r = el("div", "row");
-  const ic = el("span", "ic-badge " + (COLOR[kind(it)] || ""));
-  if (canShow(it)) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = ""; ic.append(img); }
-  else ic.append(icon(ICON_OF[kind(it)] || "file"));
+// Sonradan Sil satırı: tek öğe ya da albüm; süre (1 hafta / 2 hafta / 1 ay) doğrudan seçilir.
+function binRow(items) {
+  const it = items[0], album = items.length > 1;
+  const r = el("div", "row bin-row");
+  const ic = el("span", "ic-badge " + (album ? "orange" : COLOR[kind(it)] || ""));
+  const pic = items.find(canShow);
+  if (pic) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(pic); img.alt = ""; ic.append(img); }
+  else ic.append(icon(album ? "folder" : ICON_OF[kind(it)] || "file"));
+  if (album) ic.append(el("span", "stack-n", String(items.length)));
   const main = el("div", "main-t");
-  const soon = it.expires_at - Date.now() / 1000 < 2 * 86400;
+  const exp = Math.min(...items.map((i) => i.expires_at));
+  const soon = exp - Date.now() / 1000 < 2 * 86400;
+  const total = items.reduce((n, i) => n + (i.size || 0), 0);
   const sub = el("div", "sub" + (soon ? " soon" : ""));
-  sub.append(icon("clock"), el("span", "", `${left(it.expires_at)}${it.kind === "file" ? " · " + size(it.size) : ""}`));
-  if (it.batch_name) sub.append(el("span", "", "· " + it.batch_name));
-  main.append(el("div", "name", it.kind === "text" ? it.text.replace(/\s+/g, " ").slice(0, 80) : it.name), sub);
+  sub.append(icon("clock"), el("span", "", `${left(exp)}${total ? " · " + size(total) : ""}`));
+  const name = album ? `${albumTitle(items)} · ${albumSummary(items)}`
+    : (it.kind === "text" ? it.text.replace(/\s+/g, " ").slice(0, 80) : it.name);
+  main.append(el("div", "name", name), sub);
+  const seg = el("div", "segmented mini");
+  const cur = it.retention_days;
+  [7, 14, 30].forEach((d) => {
+    const b = el("button", d === cur ? "on" : "", DAYS[d]);
+    b.title = `${DAYS[d]} sonra silinsin`;
+    b.addEventListener("click", () => { if (d !== cur) setDuration(items, d); });
+    seg.append(b);
+  });
+  main.append(seg);
+  const side = el("div", "bin-side");
   const back = el("button", "btn soft", "Geri yükle");
-  back.addEventListener("click", () => restore(it));
-  const more = el("button", "more"); more.append(icon("more")); more.title = "Diğer";
-  more.addEventListener("click", () => sheet(`${it.name} · ${left(it.expires_at)}`, [
-    ["Geri yükle", () => restore(it)],
-    ["Süreyi 1 hafta yap", () => softDelete(it, 7)],
-    ["Süreyi 2 hafta yap", () => softDelete(it, 14)],
-    ["Süreyi 1 ay yap", () => softDelete(it, 30)],
-    ["Kalıcı olarak sil", () => purge(it), true],
-  ]));
-  r.append(ic, main, back, more);
+  back.addEventListener("click", () => restoreAll(items));
+  const del = el("button", "btn danger-soft", "Şimdi sil");
+  del.addEventListener("click", () => purgeAll(items));
+  side.append(back, del);
+  r.append(ic, main, side);
   return r;
 }
 function setBadge(tab, n) {
@@ -696,10 +750,10 @@ function render() {
   renderAlbum();
   $("#sent-empty").hidden = fo.length > 0;
   setBadge("inbox", incoming.filter((i) => !seen.has(i.id)).length);
-  $("#bin").replaceChildren(...d.bin.map(binRow));
+  $("#bin").replaceChildren(...grouped(d.bin).map((g) => binRow(g.album ? g.items : [g.item])));
   $("#bin-empty").hidden = d.bin.length > 0;
   $("#empty-bin").hidden = d.bin.length === 0;
-  setBadge("bin", d.bin.length);
+  setBadge("bin", grouped(d.bin).length);
   document.querySelectorAll("#retention button").forEach((b) => b.classList.toggle("on", +b.dataset.d === d.retention_days));
   renderDevices(d);
 }

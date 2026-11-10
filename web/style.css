@@ -239,3 +239,23 @@ body.dragging .drop { display: grid; }
   color: #fff; font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 99px; backdrop-filter: blur(6px); }
 .item.album { box-shadow: var(--shadow), 6px 6px 0 -2px var(--card), 6px 6px 0 -1px var(--sep); margin: 0 6px 6px 0; }
 #album-back { margin-right: auto; }
+
+/* kolaj 5 kare: üstte 2, altta 3 */
+.collage.n5 { grid-template-columns: repeat(6, 1fr); grid-template-rows: 1fr 1fr; }
+.collage.n5 .cell:nth-child(-n+2) { grid-column: span 3; }
+.collage.n5 .cell:nth-child(n+3) { grid-column: span 2; }
+.collage .more-n { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.45); color: #fff; font-size: 22px; font-weight: 700; }
+.collage .mini-play { position: absolute; width: 26px; height: 26px; border-radius: 50%; background: rgba(0,0,0,.45); color: #fff; display: grid; place-items: center; font-size: 12px; }
+/* Sonradan Sil satırları */
+.bin-row { align-items: flex-start; }
+.bin-row .ic-badge { position: relative; overflow: visible; }
+.bin-row .ic-badge img { border-radius: 11px; }
+.stack-n { position: absolute; right: -6px; bottom: -6px; background: var(--card); color: var(--text); font-size: 11px; font-weight: 700; min-width: 20px; height: 20px; line-height: 20px; text-align: center; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.2); padding: 0 5px; }
+.segmented.mini { margin-top: 8px; max-width: 300px; }
+.segmented.mini button { padding: 4px 8px; font-size: 12px; }
+.bin-side { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.bin-side .btn { width: auto; margin: 0; padding: 7px 12px; font-size: 14px; }
+.btn.danger-soft { background: rgba(255,59,48,.1); color: var(--red); }
+@media (max-width: 520px) { .bin-side .btn { padding: 6px 10px; font-size: 13px; } }
+.toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 14px; padding-right: 8px; }
+.toast button { color: #0a84ff; font-weight: 700; font-size: 14px; padding: 4px 10px; border-radius: 99px; background: rgba(255,255,255,.12); }
