@@ -38,7 +38,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 WEB = HERE / "web"
-DEFAULT_PORT = 8765
+DEFAULT_PORT = 47800          # Reels Fabrikası 8765 kullanır; çakışmasın
+PORT_RANGE = 10
+IN_DIR, OUT_DIR, BIN_DIR = "Gelenler", "Gönderilenler", "Sonradan Sil"
 DAY = 86400
 RETENTION_CHOICES = (7, 14, 30)          # 1 hafta, 2 hafta, 1 ay
 MAX_TEXT = 1_000_000
@@ -101,12 +103,18 @@ def local_ips() -> list[str]:
 
 
 class Store:
-    """Öğelerin (dosya/yazı) kaydı. Dosyalar `files/`, kayıt `items.json`."""
+    """Öğelerin (dosya/yazı) kaydı.
+
+    Telefondan gelenler `Gelenler/`, bilgisayardan gönderilenler `Gönderilenler/`, silinenler
+    `Sonradan Sil/` klasöründe gerçek adlarıyla durur; kayıt `items.json`. `item["file"]` köke
+    göreli yoldur (eski sürümün `files/<id>.uzantı` kayıtları da okunur)."""
 
     def __init__(self, root: Path):
         self.root = Path(root)
         self.files = self.root / "files"
-        self.files.mkdir(parents=True, exist_ok=True)
+        for d in (IN_DIR, OUT_DIR, BIN_DIR):
+            (self.root / d).mkdir(parents=True, exist_ok=True)
+        self.devices: dict[str, float] = {}
         self.meta = self.root / "items.json"
         self.cfg_path = self.root / "ayarlar.json"
         self.lock = threading.RLock()
@@ -150,7 +158,44 @@ class Store:
             return next((i for i in self.items if i["id"] == item_id), None)
 
     def path_of(self, item: dict) -> Path:
-        return self.files / item["file"]
+        f = item["file"]
+        return self.root / f if "/" in f else self.files / f
+
+    def _rel(self, path: Path) -> str:
+        return path.relative_to(self.root).as_posix()
+
+    def _reserve(self, folder: str, name: str) -> Path:
+        """Klasörde boş bir ad bulur ve `.part` yer tutucusuyla ayırır (kilit altında)."""
+        base, ext = os.path.splitext(name)
+        with self.lock:
+            n = 1
+            while True:
+                cand = self.root / folder / (name if n == 1 else f"{base} ({n}){ext}")
+                part = cand.with_name(cand.name + ".part")
+                if not cand.exists() and not part.exists():
+                    part.parent.mkdir(parents=True, exist_ok=True)
+                    open(part, "xb").close()
+                    return cand
+                n += 1
+
+    def _move(self, item: dict, folder: str) -> None:
+        src = self.path_of(item)
+        if not src.exists():
+            return
+        dst = self._reserve(folder, item["name"])
+        part = dst.with_name(dst.name + ".part")
+        try:
+            os.replace(src, dst)
+        finally:
+            part.unlink(missing_ok=True)
+        item["file"] = self._rel(dst)
+
+    def touch(self, device: str) -> None:
+        self.devices[device] = time.time()
+
+    @staticmethod
+    def home_dir(item: dict) -> str:
+        return OUT_DIR if item.get("source") == "Bilgisayar" else IN_DIR
 
     def _new_item(self, **kw) -> dict:
         item = {"id": uuid.uuid4().hex[:12], "created": time.time(),
@@ -171,9 +216,8 @@ class Store:
                         mime: str | None = None) -> dict:
         name = safe_name(name)
         fid = uuid.uuid4().hex[:12]
-        ext = Path(name).suffix[:12]
-        fname = f"{fid}{ext}"
-        tmp = self.files / (fname + ".part")
+        final = self._reserve(OUT_DIR if source == "Bilgisayar" else IN_DIR, name)
+        tmp = final.with_name(final.name + ".part")
         written = 0
         try:
             with open(tmp, "wb") as fh:
@@ -187,12 +231,12 @@ class Store:
                     remaining -= len(chunk)
             if written != length:
                 raise IOError("aktarım yarıda kesildi")
-            os.replace(tmp, self.files / fname)
+            os.replace(tmp, final)
         except BaseException:
             tmp.unlink(missing_ok=True)
             raise
         mime = mime or mimetypes.guess_type(name)[0] or "application/octet-stream"
-        item = self._new_item(id=fid, kind="file", name=name, file=fname,
+        item = self._new_item(id=fid, kind="file", name=final.name, file=self._rel(final),
                               size=written, mime=mime, source=source)
         with self.lock:
             self.items.append(item)
@@ -227,6 +271,8 @@ class Store:
             if not item:
                 raise KeyError(item_id)
             now = time.time()
+            if item.get("kind") == "file" and not item["file"].startswith(BIN_DIR + "/"):
+                self._move(item, BIN_DIR)
             item["deleted_at"] = item["deleted_at"] or now
             item["expires_at"] = now + days * DAY
             item["retention_days"] = days
@@ -238,6 +284,8 @@ class Store:
             item = self.get(item_id)
             if not item:
                 raise KeyError(item_id)
+            if item.get("kind") == "file" and item["file"].startswith(BIN_DIR + "/"):
+                self._move(item, self.home_dir(item))
             item["deleted_at"] = None
             item["expires_at"] = None
             item.pop("retention_days", None)
@@ -286,6 +334,7 @@ class Store:
             return {"items": active, "bin": binned, "version": self.version,
                     "retention_days": self.cfg.get("retention_days", 14),
                     "choices": list(RETENTION_CHOICES), "now": time.time(),
+                    "devices": [{"name": k, "last_seen": v} for k, v in self.devices.items()],
                     "total_size": sum(i.get("size", 0) for i in self.items)}
 
 
@@ -341,19 +390,27 @@ class Handler(BaseHTTPRequestHandler):
         return device_from_ua(self.headers.get("User-Agent", ""))
 
     # ---- GET -------------------------------------------------------------
+    @property
+    def is_local(self) -> bool:
+        return self.client_address[0] in ("127.0.0.1", "::1")
+
     def do_GET(self):
         path = urllib.parse.urlsplit(self.path).path
+        if path == "/api/ping":
+            return self._json({"app": "aktarim", "version": 2})
         if path in STATIC:
             if path == "/" and not self._token_ok():
                 return self._locked_page()
             return self._static(STATIC[path], set_cookie=(path == "/"))
         if not self._token_ok():
             return self._error(401, "bağlantı anahtarı gerekli — QR kodunu yeniden okutun")
+        self.store.touch(self.source)
         if path == "/api/items":
             return self._json(self.store.listing())
         if path == "/api/info":
             return self._json({"urls": self.urls, "token": self.store.cfg["token"],
-                               "device": self.source, "data_dir": str(self.store.root)})
+                               "device": self.source, "data_dir": str(self.store.root),
+                               "local": self.is_local})
         if path == "/api/version":
             return self._json({"version": self.store.version})
         m = re.fullmatch(r"/api/file/([0-9a-f]{12})(?:/.*)?", path)
@@ -449,6 +506,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         if not self._token_ok():
             return self._error(401, "bağlantı anahtarı gerekli")
+        self.store.touch(self.source)
         try:
             if path == "/api/upload":
                 length = int(self.headers.get("Content-Length") or -1)
@@ -475,6 +533,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True})
             if path == "/api/empty-bin":
                 return self._json({"removed": self.store.empty_bin()})
+            if path in ("/api/reveal", "/api/open-folder"):
+                if not self.is_local:
+                    return self._error(403, "yalnızca bu bilgisayardan")
+                target = self.store.root
+                if path == "/api/reveal":
+                    item = self.store.get(data.get("id", ""))
+                    if not item or item.get("kind") != "file":
+                        raise KeyError(data.get("id"))
+                    target = self.store.path_of(item)
+                reveal(target)
+                return self._json({"ok": True})
             if path == "/api/settings":
                 self.store.set_retention(int(data["retention_days"]))
                 return self._json({"retention_days": self.store.cfg["retention_days"]})
@@ -485,6 +554,30 @@ class Handler(BaseHTTPRequestHandler):
         except OSError as exc:
             return self._error(500, f"kaydedilemedi: {exc}")
         return self._error(404, "bulunamadı")
+
+
+def reveal(path: Path) -> None:
+    """Dosyayı Gezgin'de seçili göster ya da klasörü aç."""
+    import subprocess
+    path = Path(path)
+    if os.name == "nt":
+        if path.is_file():
+            subprocess.Popen(["explorer", "/select,", str(path)])
+        else:
+            os.startfile(str(path))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", "-R", str(path)] if path.is_file() else ["open", str(path)])
+    else:
+        subprocess.Popen(["xdg-open", str(path.parent if path.is_file() else path)])
+
+
+def port_busy(port: int) -> bool:
+    """Kapıda başka bir program (ör. Reels Fabrikası) dinliyor mu?"""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.4):
+            return True
+    except OSError:
+        return False
 
 
 def make_server(store: Store, host="0.0.0.0", port=DEFAULT_PORT) -> ThreadingHTTPServer:
@@ -508,10 +601,22 @@ def janitor(store: Store, stop: threading.Event, every=600) -> None:
 def cmd_serve(args) -> None:
     store = Store(Path(args.dir) if args.dir else default_data_dir())
     port = args.port or int(store.cfg.get("port", DEFAULT_PORT))
-    try:
-        srv = make_server(store, port=port)
-    except OSError:
+    if port == 8765:          # eski sürümün kapısı Reels Fabrikası'yla çakışıyordu
+        port = DEFAULT_PORT
+    srv = None
+    for cand in range(port, port + PORT_RANGE):
+        if port_busy(cand):
+            continue
+        try:
+            srv = make_server(store, port=cand)
+            break
+        except OSError:
+            continue
+    if srv is None:
         srv = make_server(store, port=0)
+    if store.cfg.get("port") != srv.server_address[1]:
+        store.cfg["port"] = srv.server_address[1]
+        store._save_cfg()
     port = srv.server_address[1]
     stop = threading.Event()
     threading.Thread(target=janitor, args=(store, stop), daemon=True).start()

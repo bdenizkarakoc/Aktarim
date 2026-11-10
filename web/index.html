@@ -16,107 +16,113 @@
 <title>Aktarım</title>
 </head>
 <body>
-<div id="app">
-  <header class="nav">
-    <div class="nav-row">
-      <span class="device" id="device">…</span>
-      <span class="status" id="status"><i></i><b>Bağlı</b></span>
-    </div>
-    <h1 id="title">Paylaşılanlar</h1>
-  </header>
+<div class="shell">
+  <aside class="side">
+    <div class="brand"><img src="/icon.svg" alt=""><div><b>Aktarım</b><small>Telefon ↔ Bilgisayar</small></div></div>
+    <nav class="side-nav" id="side-nav"></nav>
+    <div class="devices" id="devices"></div>
+  </aside>
 
-  <!-- PAYLAŞILANLAR -->
-  <section class="page" data-page="items">
-    <div class="segmented" id="filter">
-      <button data-f="all" class="on">Tümü</button>
-      <button data-f="photo">Fotoğraf</button>
-      <button data-f="video">Video</button>
-      <button data-f="doc">Belge</button>
-      <button data-f="text">Yazı</button>
-    </div>
-    <div class="photo-grid" id="photos"></div>
-    <div class="group" id="list"></div>
-    <p class="empty" id="empty">Henüz bir şey yok.<br>Bilgisayarda dosyaları bu pencereye sürükle,
-      telefonda <b>Gönder</b> sekmesini kullan.</p>
-  </section>
+  <main class="main">
+    <header class="top">
+      <div class="top-row">
+        <span class="chip" id="device">…</span>
+        <span class="status" id="status"><i></i><b>Bağlanıyor</b></span>
+      </div>
+      <h1 id="title">Gönder</h1>
+      <p class="lead" id="lead"></p>
+    </header>
 
-  <!-- GÖNDER -->
-  <section class="page" data-page="send" hidden>
-    <label class="big-btn" for="pick">
-      <span class="ico">＋</span>
-      <span><b>Fotoğraf, video ya da dosya seç</b><small id="pick-hint">Birden fazla seçebilirsin</small></span>
-    </label>
-    <input type="file" id="pick" multiple hidden>
-    <label class="big-btn alt" for="pick-cam">
-      <span class="ico">◉</span>
-      <span><b>Kamerayla çek ve gönder</b><small>Fotoğraf ya da video</small></span>
-    </label>
-    <input type="file" id="pick-cam" accept="image/*,video/*" capture="environment" hidden>
-    <div class="card">
-      <textarea id="text" rows="4" placeholder="Yazı, not ya da bağlantı yaz… (bilgisayarda Ctrl+V ile görsel de yapıştırabilirsin)"></textarea>
-      <button class="primary" id="send-text">Yazıyı gönder</button>
-    </div>
-    <div class="group" id="uploads"></div>
-  </section>
+    <!-- GÖNDER -->
+    <section class="page" data-page="send">
+      <div class="drop-hero" id="drop-hero">
+        <div class="art" data-art="send"></div>
+        <div class="drop-text">
+          <b id="drop-title">Dosyaları buraya sürükle bırak</b>
+          <span id="drop-sub">Fotoğraf, video, belge, klasör… ne olursa. Ya da aşağıdan seç.</span>
+        </div>
+      </div>
+      <div class="pick-grid" id="pick-grid"></div>
+      <input type="file" id="in-photo" accept="image/*" multiple hidden>
+      <input type="file" id="in-video" accept="video/*" multiple hidden>
+      <input type="file" id="in-doc" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.rtf,.csv,.key,.pages,.numbers,.odt,.zip" multiple hidden>
+      <input type="file" id="in-any" multiple hidden>
+      <input type="file" id="in-cam" accept="image/*,video/*" capture="environment" hidden>
+      <div class="card text-card">
+        <div class="card-head"><span class="ic-badge" data-icon="text"></span><b>Yazı, not ya da bağlantı</b></div>
+        <textarea id="text" rows="3" placeholder="Buraya yaz ya da yapıştır…"></textarea>
+        <button class="btn primary" id="send-text">Gönder</button>
+      </div>
+      <div class="uploads" id="uploads"></div>
+    </section>
 
-  <!-- SONRADAN SİL -->
-  <section class="page" data-page="bin" hidden>
-    <p class="note">Sildiğin her şey önce buraya gelir. Süresi dolana kadar <b>geri yükleyebilirsin</b>;
-      süre dolunca kendiliğinden kalıcı olarak silinir.</p>
-    <div class="caption">Varsayılan saklama süresi</div>
-    <div class="segmented" id="retention">
-      <button data-d="7">1 hafta</button>
-      <button data-d="14">2 hafta</button>
-      <button data-d="30">1 ay</button>
-    </div>
-    <div class="group" id="bin"></div>
-    <p class="empty" id="bin-empty">Sonradan Sil kutusu boş.</p>
-    <button class="danger-btn" id="empty-bin" hidden>Kutuyu şimdi boşalt</button>
-  </section>
+    <!-- GELENLER -->
+    <section class="page" data-page="inbox" hidden>
+      <div class="toolbar">
+        <div class="segmented" data-filter="inbox"></div>
+        <div class="tools" id="inbox-tools"></div>
+      </div>
+      <div class="cards" id="inbox"></div>
+      <div class="empty" id="inbox-empty"><div class="art" data-art="inbox"></div>
+        <b>Henüz bir şey gelmedi</b><span id="inbox-empty-sub"></span></div>
+    </section>
 
-  <!-- BAĞLAN -->
-  <section class="page" data-page="connect" hidden>
-    <div class="card center">
-      <div id="qr"></div>
-      <p class="qr-text">iPhone'da <b>Kamera</b>, Samsung'da <b>Kamera</b> ya da <b>Google Lens</b> ile okut.
-        Telefon ve bilgisayar aynı Wi-Fi ağında olmalı.</p>
-      <select id="urls"></select>
-      <button class="secondary" id="copy-url">Bağlantıyı kopyala</button>
-    </div>
-    <div class="card">
-      <b>Uygulama gibi kullan</b>
-      <ul class="tips">
-        <li><b>iPhone:</b> Safari'de Paylaş <span class="k">⬆︎</span> → <b>Ana Ekrana Ekle</b>.</li>
-        <li><b>Samsung:</b> Chrome / Samsung Internet menüsü → <b>Ana ekrana ekle</b>.</li>
-        <li><b>Bilgisayar:</b> dosyaları bu pencereye sürükle-bırak; ya da sağ tık → Gönder → Telefona gönder
-          (<code>.\Aktarim.ps1 -GonderKur</code>).</li>
-      </ul>
-      <p class="muted" id="data-dir"></p>
-    </div>
-  </section>
+    <!-- GÖNDERDİKLERİM -->
+    <section class="page" data-page="sent" hidden>
+      <div class="toolbar"><div class="segmented" data-filter="sent"></div></div>
+      <div class="cards" id="sent"></div>
+      <div class="empty" id="sent-empty"><div class="art" data-art="sent"></div>
+        <b>Henüz bir şey göndermedin</b><span>Gönder sekmesinden fotoğraf, video ya da dosya seç.</span></div>
+    </section>
 
-  <nav class="tabbar" id="tabs">
-    <button data-tab="items" class="on"><span>▦</span>Paylaşılanlar</button>
-    <button data-tab="send"><span>⬆︎</span>Gönder</button>
-    <button data-tab="bin"><span>🗑</span>Sonradan Sil<em id="bin-count" hidden></em></button>
-    <button data-tab="connect"><span>⌁</span>Bağlan</button>
-  </nav>
+    <!-- SONRADAN SİL -->
+    <section class="page" data-page="bin" hidden>
+      <div class="card info">
+        <span class="ic-badge orange" data-icon="clock"></span>
+        <div><b>Silinenler önce burada bekler</b>
+          <span>Süresi dolana kadar <b>geri yükleyebilirsin</b>. Süre dolunca kendiliğinden kalıcı olarak silinir.</span></div>
+      </div>
+      <div class="caption">Varsayılan saklama süresi</div>
+      <div class="segmented wide" id="retention"></div>
+      <div class="list" id="bin"></div>
+      <div class="empty" id="bin-empty"><div class="art" data-art="bin"></div><b>Sonradan Sil kutusu boş</b>
+        <span>Bir öğede “Sonradan sil”i seçince buraya gelir.</span></div>
+      <button class="btn danger" id="empty-bin" hidden>Kutuyu şimdi boşalt</button>
+    </section>
+
+    <!-- BAĞLAN -->
+    <section class="page" data-page="connect" hidden>
+      <div class="connect">
+        <div class="card qr-card">
+          <div id="qr"></div>
+          <select id="urls" aria-label="Bağlantı adresi"></select>
+          <button class="btn soft" id="copy-url">Bağlantıyı kopyala</button>
+        </div>
+        <div class="steps">
+          <div class="step"><span>1</span><div><b>Aynı Wi-Fi</b>Telefon ve bilgisayar aynı Wi-Fi ağına bağlı olsun.</div></div>
+          <div class="step"><span>2</span><div><b>QR kodu okut</b>iPhone'da <b>Kamera</b>, Samsung'da <b>Kamera</b> ya da <b>Google Lens</b>'i QR koda tut, çıkan bağlantıya dokun.</div></div>
+          <div class="step"><span>3</span><div><b>Uygulama gibi ekle</b>iPhone (Safari): Paylaş → <b>Ana Ekrana Ekle</b>. Samsung: menü ⋮ → <b>Ana ekrana ekle</b>.</div></div>
+          <div class="step"><span>4</span><div><b>Hazır</b>Telefondan gönderdiklerin bilgisayarda <b>Gelenler</b>'e düşer; bilgisayardan gönderdiklerin telefonda <b>Gelenler</b>'de görünür.</div></div>
+          <p class="muted" id="data-dir"></p>
+        </div>
+      </div>
+    </section>
+  </main>
 </div>
 
-<div class="drop" id="drop"><div>Bırak, telefona gönderilsin</div></div>
+<nav class="tabbar" id="tabbar"></nav>
+
+<div class="drop" id="drop"><div><span class="art" data-art="drop"></span><b>Bırak, gönderilsin</b></div></div>
 
 <div class="sheet-back" id="sheet-back" hidden>
   <div class="sheet" role="dialog">
-    <div class="sheet-group">
-      <div class="sheet-title" id="sheet-title"></div>
-      <div id="sheet-actions"></div>
-    </div>
+    <div class="sheet-group"><div class="sheet-title" id="sheet-title"></div><div id="sheet-actions"></div></div>
     <button class="sheet-cancel" id="sheet-cancel">Vazgeç</button>
   </div>
 </div>
 
 <div class="viewer" id="viewer" hidden>
-  <button class="viewer-close" id="viewer-close">Bitti</button>
+  <div class="viewer-bar"><span id="viewer-name"></span><button id="viewer-close">Bitti</button></div>
   <div class="viewer-body" id="viewer-body"></div>
 </div>
 

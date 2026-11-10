@@ -9,7 +9,8 @@
   süre dolunca kendiliğinden silinir. Veri biçimi Python sürümüyle (aktarim.py) aynıdır.
 
 .EXAMPLE
-  .\Aktarim.ps1                       # sunucuyu başlat, tarayıcıyı aç
+  .\Aktarim.ps1                       # arka planda başlat (saat yanında simge) ve Aktarım penceresini aç
+  .\Aktarim.ps1 -Konsol               # simgesiz, bu pencerede çalıştır (sorun giderme)
   .\Aktarim.ps1 -Ekle dosya1 klasor2  # çalışan sunucuya dosya gönder
   .\Aktarim.ps1 -GonderKur            # sağ tık → Gönder → "Telefona gönder (Aktarım)"
   .\Aktarim.ps1 -GuvenlikDuvari       # (yönetici) güvenlik duvarına izin kuralı ekle
@@ -22,6 +23,7 @@ param(
   [switch]$Ekle,
   [switch]$GonderKur,
   [switch]$GuvenlikDuvari,
+  [switch]$Konsol,
   [Parameter(ValueFromRemainingArguments = $true)][string[]]$Dosyalar
 )
 
@@ -34,6 +36,7 @@ $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 # ---------------------------------------------------------------------------
 $LibText = @'
 $RetentionChoices = @(7, 14, 30)
+$InDir = 'Gelenler'; $OutDir = 'Gönderilenler'; $BinDir = 'Sonradan Sil'
 $Day = 86400
 $Utf8 = New-Object System.Text.UTF8Encoding $false
 try { Add-Type -AssemblyName System.Web -ErrorAction Stop } catch {}
@@ -96,15 +99,16 @@ function Get-Mime([string]$Name) {
 
 function New-Shared([string]$Root) {
   $files = Join-Path $Root 'files'
-  [void][IO.Directory]::CreateDirectory($files)
+  foreach ($d in @($InDir, $OutDir, $BinDir)) { [void][IO.Directory]::CreateDirectory((Join-Path $Root $d)) }
   $S = [hashtable]::Synchronized(@{})
   $S.Root = $Root; $S.Files = $files; $S.Lock = New-Object object; $S.Version = 0
   $S.Meta = Join-Path $Root 'items.json'; $S.CfgPath = Join-Path $Root 'ayarlar.json'
   $S.Items = New-Object System.Collections.ArrayList
+  $S.Devices = [hashtable]::Synchronized(@{})
   $bytes = New-Object byte[] 9
   [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   $token = [Convert]::ToBase64String($bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=')
-  $S.Cfg = @{ token = $token; retention_days = 14; port = 8765 }
+  $S.Cfg = @{ token = $token; retention_days = 14; port = 47800 }
   if (Test-Path -LiteralPath $S.CfgPath) {
     try { $c = ConvertFrom-Json ([IO.File]::ReadAllText($S.CfgPath)); foreach ($p in $c.PSObject.Properties) { $S.Cfg[$p.Name] = $p.Value } } catch {}
   }
@@ -121,6 +125,46 @@ function Save-Items($S) {
   Write-JsonFile $S.Meta @($S.Items.ToArray())
 }
 
+function Get-ItemPath($S, $Item) {
+  $f = [string]$Item.file
+  if ($f.Contains('/')) { return Join-Path $S.Root ($f.Replace('/', '\')) }
+  Join-Path $S.Files $f
+}
+
+function Get-Rel($S, [string]$Full) {
+  $Full.Substring($S.Root.TrimEnd('\').Length + 1).Replace('\', '/')
+}
+
+# Klasörde boş bir ad bulur ("foto (2).jpg") ve .part yer tutucusuyla ayırır.
+function Get-UniquePath($S, [string]$Folder, [string]$Name) {
+  $base = [IO.Path]::GetFileNameWithoutExtension($Name); $ext = [IO.Path]::GetExtension($Name)
+  $dir = Join-Path $S.Root $Folder
+  [void][IO.Directory]::CreateDirectory($dir)
+  Lock-Do $S {
+    $n = 1
+    while ($true) {
+      $cand = $Name; if ($n -gt 1) { $cand = "$base ($n)$ext" }
+      $full = Join-Path $dir $cand
+      if (-not (Test-Path -LiteralPath $full) -and -not (Test-Path -LiteralPath "$full.part")) {
+        [IO.File]::Open("$full.part", 'CreateNew', 'Write').Dispose()
+        $full
+        break
+      }
+      $n++
+    }
+  }
+}
+
+function Move-ItemFile($S, $Item, [string]$Folder) {
+  $src = Get-ItemPath $S $Item
+  if (-not (Test-Path -LiteralPath $src)) { return }
+  $dst = Get-UniquePath $S $Folder ([string]$Item.name)
+  try { [IO.File]::Move($src, $dst) } finally { Remove-Item -LiteralPath "$dst.part" -Force -ErrorAction SilentlyContinue }
+  $Item.file = Get-Rel $S $dst
+}
+
+function Get-HomeDir($Item) { if ($Item.source -eq 'Bilgisayar') { return $OutDir } $InDir }
+
 function Find-Item($S, [string]$Id) {
   foreach ($i in $S.Items) { if ($i.id -eq $Id) { return $i } }
   $null
@@ -128,7 +172,7 @@ function Find-Item($S, [string]$Id) {
 
 function Remove-ItemNow($S, $Item) {
   if ($Item.kind -eq 'file') {
-    $p = Join-Path $S.Files $Item.file
+    $p = Get-ItemPath $S $Item
     if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
   }
   $S.Items.Remove($Item)
@@ -147,14 +191,12 @@ function Remove-Expired($S) {
 function Add-FileFromStream($S, [string]$Name, $Stream, [long]$Length, [string]$Source, [string]$Mime) {
   $Name = Get-SafeName $Name
   $id = New-Id
-  $ext = [IO.Path]::GetExtension($Name)
-  if ($ext.Length -gt 12) { $ext = $ext.Substring(0, 12) }
-  $fname = "$id$ext"
-  $final = Join-Path $S.Files $fname
+  $folder = $InDir; if ($Source -eq 'Bilgisayar') { $folder = $OutDir }
+  $final = Get-UniquePath $S $folder $Name
   $tmp = "$final.part"
   $written = [long]0
   $buf = New-Object byte[] 1048576
-  $fs = [IO.File]::Open($tmp, 'Create', 'Write')
+  $fs = [IO.File]::Open($tmp, 'Truncate', 'Write')
   try {
     while ($written -lt $Length) {
       $want = [int][Math]::Min($buf.Length, $Length - $written)
@@ -167,8 +209,8 @@ function Add-FileFromStream($S, [string]$Name, $Stream, [long]$Length, [string]$
   if ($written -ne $Length) { Remove-Item -LiteralPath $tmp -Force; throw 'aktarım yarıda kesildi' }
   [IO.File]::Move($tmp, $final)
   if (-not $Mime -or $Mime -eq 'application/x-www-form-urlencoded' -or $Mime -eq 'application/octet-stream') { $Mime = Get-Mime $Name }
-  $item = @{ id = $id; created = (Now-Unix); deleted_at = $null; expires_at = $null; kind = 'file'; name = $Name;
-             file = $fname; size = $written; mime = $Mime; source = $Source }
+  $item = @{ id = $id; created = (Now-Unix); deleted_at = $null; expires_at = $null; kind = 'file';
+             name = [IO.Path]::GetFileName($final); file = (Get-Rel $S $final); size = $written; mime = $Mime; source = $Source }
   Lock-Do $S { [void]$S.Items.Add($item); Save-Items $S }
   $item
 }
@@ -197,6 +239,7 @@ function Set-SoftDelete($S, [string]$Id, $Days) {
     $it = Find-Item $S $Id
     if (-not $it) { throw [Collections.Generic.KeyNotFoundException]'öğe bulunamadı' }
     $now = Now-Unix
+    if ($it.kind -eq 'file' -and -not ([string]$it.file).StartsWith("$BinDir/")) { Move-ItemFile $S $it $BinDir }
     if (-not $it.deleted_at) { $it.deleted_at = $now }
     $it.expires_at = $now + [int]$Days * $Day
     $it.retention_days = [int]$Days
@@ -209,6 +252,7 @@ function Set-Restore($S, [string]$Id) {
   Lock-Do $S {
     $it = Find-Item $S $Id
     if (-not $it) { throw [Collections.Generic.KeyNotFoundException]'öğe bulunamadı' }
+    if ($it.kind -eq 'file' -and ([string]$it.file).StartsWith("$BinDir/")) { Move-ItemFile $S $it (Get-HomeDir $it) }
     $it.deleted_at = $null; $it.expires_at = $null; $it.Remove('retention_days')
     Save-Items $S
     $it
@@ -241,7 +285,8 @@ function Get-Listing($S) {
     $total = [long]0
     foreach ($i in $all) { if ($i.size) { $total += [long]$i.size } }
     [ordered]@{ items = $active; bin = $bin; version = [int]$S.Version; retention_days = [int]$S.Cfg.retention_days;
-                choices = $RetentionChoices; now = (Now-Unix); total_size = $total }
+                choices = $RetentionChoices; now = (Now-Unix); total_size = $total;
+                devices = @(foreach ($k in @($S.Devices.Keys)) { @{ name = $k; last_seen = $S.Devices[$k] } }) }
   }
 }
 
@@ -347,7 +392,7 @@ function Send-Locked($Out) {
 function Send-FileItem($S, $Out, $Req, [string]$Id) {
   $it = Lock-Do $S { Find-Item $S $Id }
   if (-not $it -or $it.kind -ne 'file') { return Send-Error $Out 404 'dosya yok' }
-  $p = Join-Path $S.Files $it.file
+  $p = Get-ItemPath $S $it
   if (-not (Test-Path -LiteralPath $p)) { return Send-Error $Out 404 'dosya diskte yok' }
   $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
   try {
@@ -385,22 +430,25 @@ function Invoke-Route($S, $Req, $In, $Out) {
   $path = $Req.Path
   $src = Get-Device $Req.Headers['user-agent']
   if ($Req.Method -eq 'GET' -or $Req.Method -eq 'HEAD') {
+    if ($path -eq '/api/ping') { return Send-Json $Out @{ app = 'aktarim'; version = 2 } }
     if ($Static.ContainsKey($path)) {
       if ($path -eq '/' -and -not (Test-Token $S $Req)) { return Send-Locked $Out }
       return Send-Static $S $Out $Static[$path] ($path -eq '/')
     }
     if (-not (Test-Token $S $Req)) { return Send-Error $Out 401 'bağlantı anahtarı gerekli — QR kodunu yeniden okutun' }
+    $S.Devices[$src] = Now-Unix
     if ($path -eq '/api/items') {
       $json = Lock-Do $S { ConvertTo-Json -InputObject (Get-Listing $S) -Depth 6 -Compress }
       return Send-Bytes $Out 200 'OK' @{ 'Content-Type' = 'application/json; charset=utf-8'; 'Cache-Control' = 'no-store' } ($Utf8.GetBytes($json))
     }
     if ($path -eq '/api/version') { return Send-Json $Out @{ version = [int]$S.Version } }
-    if ($path -eq '/api/info') { return Send-Json $Out @{ urls = @($S.Urls); token = $S.Cfg.token; device = $src; data_dir = $S.Root } }
+    if ($path -eq '/api/info') { return Send-Json $Out @{ urls = @($S.Urls); token = $S.Cfg.token; device = $src; data_dir = $S.Root; local = [bool]$Req.Local } }
     if ($path -match '^/api/file/([0-9a-f]{12})(/.*)?$') { return Send-FileItem $S $Out $Req $Matches[1] }
     return Send-Error $Out 404 'bulunamadı'
   }
   if ($Req.Method -ne 'POST') { return Send-Error $Out 404 'bulunamadı' }
   if (-not (Test-Token $S $Req)) { return Send-Error $Out 401 'bağlantı anahtarı gerekli' }
+  $S.Devices[$src] = Now-Unix
   try {
     if ($path -eq '/api/upload') {
       if (-not $Req.Headers['content-length']) { return Send-Error $Out 411 'Content-Length gerekli' }
@@ -417,6 +465,17 @@ function Invoke-Route($S, $Req, $In, $Out) {
       '/api/restore'   { return Send-Json $Out (Set-Restore $S ([string]$data.id)) }
       '/api/purge'     { Remove-Hard $S ([string]$data.id); return Send-Json $Out @{ ok = $true } }
       '/api/empty-bin' { return Send-Json $Out @{ removed = (Clear-Bin $S) } }
+      { $_ -eq '/api/reveal' -or $_ -eq '/api/open-folder' } {
+        if (-not $Req.Local) { return Send-Error $Out 403 'yalnızca bu bilgisayardan' }
+        if ($path -eq '/api/open-folder') {
+          Start-Process explorer.exe -ArgumentList ('"' + $S.Root + '"')
+        } else {
+          $it = Lock-Do $S { Find-Item $S ([string]$data.id) }
+          if (-not $it -or $it.kind -ne 'file') { throw [Collections.Generic.KeyNotFoundException]'öğe bulunamadı' }
+          Start-Process explorer.exe -ArgumentList ('/select,"' + (Get-ItemPath $S $it) + '"')
+        }
+        return Send-Json $Out @{ ok = $true }
+      }
       '/api/settings'  {
         Test-Days $data.retention_days
         Lock-Do $S { $S.Cfg.retention_days = [int]$data.retention_days; Write-JsonFile $S.CfgPath $S.Cfg; $S.Version = [int]$S.Version + 1 }
@@ -440,7 +499,10 @@ function Invoke-Client($Client, $S) {
     $ns = $Client.GetStream()
     $in = New-Object IO.BufferedStream($ns, 65536)
     $req = Read-Request $in
-    if ($req) { Invoke-Route $S $req $in $ns }
+    if ($req) {
+      $req.Local = [Net.IPAddress]::IsLoopback($Client.Client.RemoteEndPoint.Address)
+      Invoke-Route $S $req $in $ns
+    }
     $ns.Flush()
   } catch {
   } finally {
@@ -480,6 +542,39 @@ function Get-LocalIPs {
   $ips
 }
 
+function Test-OurServer([int]$P) {
+  try {
+    $r = [Net.WebRequest]::Create("http://127.0.0.1:$P/api/ping"); $r.Timeout = 800
+    $resp = $r.GetResponse()
+    $t = (New-Object IO.StreamReader($resp.GetResponseStream())).ReadToEnd(); $resp.Close()
+    return ($t -match 'aktarim')
+  } catch { return $false }
+}
+
+function Test-PortBusy([int]$P) {
+  $c = New-Object Net.Sockets.TcpClient
+  try {
+    $ar = $c.BeginConnect('127.0.0.1', $P, $null, $null)
+    return ($ar.AsyncWaitHandle.WaitOne(300) -and $c.Connected)
+  } catch { return $false } finally { $c.Close() }
+}
+
+# Aktarım'ı kendi penceresinde aç (Edge/Chrome uygulama penceresi; ayrı profil, adres çubuğu yok).
+function Open-Window([string]$Url) {
+  $prof = Join-Path $env:LOCALAPPDATA 'Aktarim\Pencere'
+  $cands = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe", "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
+             "$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+             "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe")
+  foreach ($exe in $cands) {
+    if ($exe -and (Test-Path -LiteralPath $exe)) {
+      Start-Process -FilePath $exe -ArgumentList @("--app=$Url", "--user-data-dir=`"$prof`"", '--window-size=1200,820',
+                                                   '--no-first-run', '--no-default-browser-check')
+      return
+    }
+  }
+  Start-Process $Url
+}
+
 # ---------------------------------------------------------------------------
 # Komutlar
 # ---------------------------------------------------------------------------
@@ -495,7 +590,7 @@ if ($GonderKur) {
 }
 
 if ($GuvenlikDuvari) {
-  $p = 8765; if ($Port) { $p = $Port }
+  $p = 47800; if ($Port) { $p = $Port }
   $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   if (-not $admin) {
     Start-Process powershell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -GuvenlikDuvari -Port $p"
@@ -521,7 +616,7 @@ if ($Ekle) {
   $cfgPath = Join-Path $DataDir 'ayarlar.json'
   $cfg = $null
   if (Test-Path -LiteralPath $cfgPath) { $cfg = ConvertFrom-Json ([IO.File]::ReadAllText($cfgPath)) }
-  $p = 8765; if ($Port) { $p = $Port } elseif ($cfg -and $cfg.port) { $p = [int]$cfg.port }
+  $p = 47800; if ($Port) { $p = $Port } elseif ($cfg -and $cfg.port) { $p = [int]$cfg.port }
   $sent = 0
   try {
     foreach ($path in $paths) {
@@ -555,15 +650,29 @@ if ($Ekle) {
 $S = New-Shared $DataDir
 $S.Web = Join-Path $Here 'web'
 if (-not (Test-Path -LiteralPath (Join-Path $S.Web 'index.html'))) { throw "web klasörü bulunamadı: $($S.Web)" }
-if (-not $Port) { $Port = [int]$S.Cfg.port }
+$start = $Port
+if (-not $start) { $start = [int]$S.Cfg.port }
+if (-not $start -or $start -eq 8765) { $start = 47800 }   # 8765'i Reels Fabrikası kullanır
 
-$listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $Port)
-try { $listener.Start() } catch {
-  Write-Host "$Port numaralı kapı kullanımda, boş bir kapı seçiliyor..." -ForegroundColor Yellow
-  $listener = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, 0)
-  $listener.Start()
+# Zaten çalışıyorsa yalnızca pencereyi aç
+foreach ($p in $start..($start + 9)) {
+  if (Test-OurServer $p) {
+    if (-not $TarayiciAcma) { Open-Window "http://127.0.0.1:$p/?k=$($S.Cfg.token)" }
+    return
+  }
 }
+$listener = $null
+foreach ($p in $start..($start + 9)) {
+  if (Test-PortBusy $p) { continue }          # başka bir program (ör. Reels Fabrikası) kullanıyor
+  try {
+    $l = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Any, $p)
+    $l.ExclusiveAddressUse = $true
+    $l.Start(); $listener = $l; break
+  } catch { }
+}
+if (-not $listener) { throw "Boş bir kapı bulunamadı ($start-$($start + 9))." }
 $Port = $listener.LocalEndpoint.Port
+if ([int]$S.Cfg.port -ne $Port) { $S.Cfg.port = $Port; Write-JsonFile $S.CfgPath $S.Cfg }
 $S.Urls = @(Get-LocalIPs | ForEach-Object { "http://${_}:$Port/?k=$($S.Cfg.token)" })
 $local = "http://127.0.0.1:$Port/?k=$($S.Cfg.token)"
 
@@ -571,27 +680,21 @@ $pool = [RunspaceFactory]::CreateRunspacePool(1, 16)
 $pool.Open()
 $jobs = New-Object System.Collections.ArrayList
 $clientScript = $LibText + "`nInvoke-Client `$args[0] `$args[1]"
+$script:lastPurge = Get-Date
+$script:lastVersion = [int]$S.Version
+$script:lastNotify = Now-Unix
+$tray = $null
 
-Write-Host ''
-Write-Host '  Aktarım çalışıyor' -ForegroundColor Cyan
-Write-Host "  Klasör     : $($S.Root)"
-Write-Host "  Bilgisayar : $local"
-foreach ($u in $S.Urls) { Write-Host "  Telefon    : $u" -ForegroundColor Green }
-Write-Host '  Telefon ile bilgisayar aynı Wi-Fi ağında olmalı. Kapatmak için bu pencereyi kapat ya da Ctrl+C.'
-Write-Host ''
-if (-not $TarayiciAcma) { Start-Process $local }
-
-$lastPurge = Get-Date
-try {
-  while ($true) {
-    if ($listener.Pending()) {
+function Step-Server {
+  try {
+    $k = 0
+    while ($listener.Pending() -and $k -lt 20) {
       $client = $listener.AcceptTcpClient()
       $ps = [PowerShell]::Create()
       $ps.RunspacePool = $pool
       [void]$ps.AddScript($clientScript).AddArgument($client).AddArgument($S)
       [void]$jobs.Add(@{ PS = $ps; Handle = $ps.BeginInvoke() })
-    } else {
-      Start-Sleep -Milliseconds 15
+      $k++
     }
     for ($i = $jobs.Count - 1; $i -ge 0; $i--) {
       $j = $jobs[$i]
@@ -601,13 +704,80 @@ try {
         $jobs.RemoveAt($i)
       }
     }
-    if (((Get-Date) - $lastPurge).TotalMinutes -ge 10) {
-      $n = Remove-Expired $S
-      if ($n) { Write-Host "  Sonradan Sil: süresi dolan $n öğe kalıcı olarak silindi." }
-      $lastPurge = Get-Date
+    if (((Get-Date) - $script:lastPurge).TotalMinutes -ge 10) {
+      [void](Remove-Expired $S)
+      $script:lastPurge = Get-Date
     }
+    if ($tray -and [int]$S.Version -ne $script:lastVersion) {
+      $script:lastVersion = [int]$S.Version
+      $since = $script:lastNotify
+      $new = @(Lock-Do $S { @($S.Items.ToArray()) | Where-Object { $_.source -ne 'Bilgisayar' -and -not $_.deleted_at -and [double]$_.created -gt $since } })
+      if ($new.Count) {
+        $max = $since; $from = @()
+        foreach ($n in $new) { if ([double]$n.created -gt $max) { $max = [double]$n.created }; if ($from -notcontains $n.source) { $from += $n.source } }
+        $script:lastNotify = $max
+        $tray.ShowBalloonTip(5000, "$($from -join ', ') gönderdi", "$($new.Count) yeni öğe Gelenler'de. Açmak için tıkla.", 'Info')
+      }
+    }
+  } catch { }
+}
+
+$useTray = -not $Konsol
+if ($useTray) {
+  try {
+    Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+    [System.Windows.Forms.Application]::EnableVisualStyles()
+  } catch { $useTray = $false }
+}
+
+if (-not $useTray) {
+  Write-Host ''
+  Write-Host '  Aktarım çalışıyor' -ForegroundColor Cyan
+  Write-Host "  Klasör     : $($S.Root)"
+  Write-Host "  Bilgisayar : $local"
+  foreach ($u in $S.Urls) { Write-Host "  Telefon    : $u" -ForegroundColor Green }
+  Write-Host '  Kapatmak için bu pencereyi kapat ya da Ctrl+C.'
+  if (-not $TarayiciAcma) { Open-Window $local }
+  try {
+    while ($true) { Step-Server; Start-Sleep -Milliseconds 15 }
+  } finally {
+    $listener.Stop(); $pool.Close()
   }
+  return
+}
+
+# ---- saat yanındaki simge ----
+$tray = New-Object System.Windows.Forms.NotifyIcon
+$icoPath = Join-Path $Here 'aktarim.ico'
+if (Test-Path -LiteralPath $icoPath) { $tray.Icon = New-Object System.Drawing.Icon($icoPath) } else { $tray.Icon = [System.Drawing.SystemIcons]::Application }
+$tray.Text = 'Aktarım'
+$menu = New-Object System.Windows.Forms.ContextMenuStrip
+$miOpen = $menu.Items.Add('Aktarım''ı aç')
+$miOpen.Font = New-Object System.Drawing.Font($miOpen.Font, [System.Drawing.FontStyle]::Bold)
+$miIn = $menu.Items.Add('Gelenler klasörünü aç')
+$miAll = $menu.Items.Add('Aktarım klasörünü aç')
+[void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+$miQuit = $menu.Items.Add('Kapat (telefon artık gönderemez)')
+$tray.ContextMenuStrip = $menu
+$miOpen.add_Click({ Open-Window $local })
+$miIn.add_Click({ Start-Process explorer.exe -ArgumentList ('"' + (Join-Path $S.Root $InDir) + '"') })
+$miAll.add_Click({ Start-Process explorer.exe -ArgumentList ('"' + $S.Root + '"') })
+$miQuit.add_Click({ [System.Windows.Forms.Application]::Exit() })
+$tray.add_MouseClick({ param($sender, $e) if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) { Open-Window $local } })
+$tray.add_BalloonTipClicked({ Open-Window $local })
+$tray.Visible = $true
+
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 25
+$timer.add_Tick({ Step-Server })
+$timer.Start()
+if (-not $TarayiciAcma) { Open-Window $local }
+$tray.ShowBalloonTip(4000, 'Aktarım çalışıyor', 'Saat yanındaki simgeden açabilirsin. Telefondan gelenler burada bildirilir.', 'Info')
+try {
+  [System.Windows.Forms.Application]::Run()
 } finally {
+  $timer.Stop()
+  $tray.Visible = $false; $tray.Dispose()
   $listener.Stop()
   foreach ($j in $jobs) { try { $j.PS.Stop(); $j.PS.Dispose() } catch {} }
   $pool.Close()

@@ -33,17 +33,23 @@ def test_safe_name():
 def test_add_delete_restore_purge(store):
     data = b"merhaba" * 100
     it = store.add_file_stream("foto.jpg", io.BytesIO(data), len(data), "iPhone")
+    assert store.path_of(it) == store.root / "Gelenler" / "foto.jpg"
     assert store.path_of(it).read_bytes() == data
+    it2 = store.add_file_stream("foto.jpg", io.BytesIO(b"x"), 1, "iPhone")
+    assert it2["name"] == "foto (2).jpg"
+    out = store.add_file_stream("rapor.pdf", io.BytesIO(b"x"), 1, "Bilgisayar")
+    assert store.path_of(out).parent.name == "Gönderilenler"
     assert it["mime"] == "image/jpeg"
     store.soft_delete(it["id"], 7)
     lst = store.listing()
-    assert not lst["items"] and lst["bin"][0]["retention_days"] == 7
+    assert it["id"] not in [i["id"] for i in lst["items"]] and lst["bin"][0]["retention_days"] == 7
+    assert store.path_of(it).parent.name == "Sonradan Sil"
     store.restore(it["id"])
-    assert store.listing()["items"][0]["id"] == it["id"]
+    assert store.path_of(it) == store.root / "Gelenler" / "foto.jpg"
     store.soft_delete(it["id"], 14)
     assert store.purge_expired(now=time.time() + 13 * aktarim.DAY) == 0
     assert store.purge_expired(now=time.time() + 15 * aktarim.DAY) == 1
-    assert not store.path_of(it).exists() and not store.items
+    assert not store.path_of(it).exists() and store.get(it["id"]) is None
 
 
 def test_bad_retention_and_partial_upload(store):
@@ -52,7 +58,7 @@ def test_bad_retention_and_partial_upload(store):
         store.soft_delete(t["id"], 3)
     with pytest.raises(IOError):
         store.add_file_stream("x.bin", io.BytesIO(b"abc"), 10, "iPhone")
-    assert not list(store.files.glob("*.part"))
+    assert not list(store.root.rglob("*.part"))
 
 
 def test_persistence(tmp_path):
@@ -84,6 +90,9 @@ def test_http_roundtrip(store):
         req = urllib.request.Request(base + "/api/delete", data=json.dumps({"id": it["id"], "days": 30}).encode(),
                                      method="POST", headers={**key, "Content-Type": "application/json"})
         assert json.loads(urllib.request.urlopen(req).read())["retention_days"] == 30
+        assert json.loads(urllib.request.urlopen(base + "/api/ping").read())["app"] == "aktarim"
+        lst = json.loads(urllib.request.urlopen(urllib.request.Request(base + "/api/items", headers=key)).read())
+        assert any(d["name"] == "iPhone" for d in lst["devices"])
         r = urllib.request.urlopen(base + f"/?k={store.cfg['token']}")
         assert "aktarim=" in r.headers["Set-Cookie"]
     finally:
@@ -122,3 +131,20 @@ def test_installer_scripts():
     for f in re.findall(r"'([^']+)'", listed):
         assert (root / f).is_file(), f"Kur.ps1 indiriyor ama depoda yok: {f}"
     assert "ProgramFiles" in kur and "Uninstall" in kur
+
+
+def test_legacy_item_path(store):
+    legacy = {"id": "abcdefabcdef", "kind": "file", "file": "abcdefabcdef.jpg", "name": "x.jpg"}
+    assert store.path_of(legacy) == store.root / "files" / "abcdefabcdef.jpg"
+
+
+def test_port_not_factory():
+    assert aktarim.DEFAULT_PORT != 8765
+
+
+def test_powershell_port_and_folders():
+    text = PS1.read_bytes().decode("utf-8-sig")
+    assert "port = 47800" in text and "$InDir = 'Gelenler'" in text
+    assert "'/api/ping'" in text and "NotifyIcon" in text
+    vbs = (PS1.parent / "Aktarim.vbs").read_bytes()
+    assert vbs.isascii() and b"Aktarim.ps1" in vbs

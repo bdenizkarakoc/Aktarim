@@ -23,10 +23,14 @@ if (-not $admin) {
 
 $name = 'Aktar' + [char]0x0131 + 'm'
 $dest = Join-Path $env:ProgramFiles 'Aktarim'
-$files = @('Aktarim.ps1', 'Kaldir.ps1', 'aktarim.ico', 'README.md', 'web/index.html', 'web/app.js', 'web/style.css',
+$files = @('Aktarim.ps1', 'Aktarim.vbs', 'Kaldir.ps1', 'aktarim.ico', 'README.md', 'web/index.html', 'web/app.js', 'web/style.css',
            'web/manifest.webmanifest', 'web/icon.svg')
 try {
   Write-Host "Kuruluyor: $dest" -ForegroundColor Cyan
+  # calisan eski Aktarim'i kapat
+  Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like '*Aktarim.ps1*' -and $_.ProcessId -ne $PID } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
   New-Item -ItemType Directory -Force -Path (Join-Path $dest 'web') | Out-Null
   foreach ($f in $files) {
     Write-Host "  indiriliyor: $f"
@@ -35,8 +39,9 @@ try {
   Get-ChildItem -LiteralPath $dest -Recurse -File | Unblock-File
 
   $ps1 = Join-Path $dest 'Aktarim.ps1'
+  $vbs = Join-Path $dest 'Aktarim.vbs'
   $ico = Join-Path $dest 'aktarim.ico'
-  $runArgs = '-NoProfile -ExecutionPolicy Bypass -File "' + $ps1 + '"'
+  $runArgs = '"' + $vbs + '"'
 
   # --- kisayollar: Baslat menusu + masaustu ---
   $shell = New-Object -ComObject WScript.Shell
@@ -44,10 +49,16 @@ try {
   $desktopLnk = Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) "$name.lnk"
   foreach ($p in @($startMenu, $desktopLnk)) {
     $l = $shell.CreateShortcut($p)
-    $l.TargetPath = 'powershell.exe'; $l.Arguments = $runArgs; $l.WorkingDirectory = $dest
+    $l.TargetPath = "$env:WINDIR\System32\wscript.exe"; $l.Arguments = $runArgs; $l.WorkingDirectory = $dest
     $l.IconLocation = "$ico,0"; $l.Description = 'Bilgisayar ile telefon arasinda dosya aktarimi'
     $l.Save()
   }
+
+  # --- Windows acilinca arka planda baslasin (pencere acmadan); telefon her zaman gonderebilsin ---
+  $startup = Join-Path ([Environment]::GetFolderPath('CommonStartup')) "$name.lnk"
+  $l = $shell.CreateShortcut($startup)
+  $l.TargetPath = "$env:WINDIR\System32\wscript.exe"; $l.Arguments = $runArgs + ' -TarayiciAcma'
+  $l.WorkingDirectory = $dest; $l.IconLocation = "$ico,0"; $l.Save()
 
   # --- eski kurulumu (AppData\Local\Aktarim) temizle ---
   $oldLnk = Join-Path $KullaniciMasaustu "$name.lnk"
@@ -73,7 +84,7 @@ try {
   $key = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Aktarim'
   New-Item -Path $key -Force | Out-Null
   $kb = [int]((Get-ChildItem -LiteralPath $dest -Recurse -File | Measure-Object Length -Sum).Sum / 1KB)
-  $vals = @{ DisplayName = $name; DisplayVersion = '1.0.0'; Publisher = $name; InstallLocation = $dest; DisplayIcon = $ico
+  $vals = @{ DisplayName = $name; DisplayVersion = '2.0.0'; Publisher = $name; InstallLocation = $dest; DisplayIcon = $ico
              UninstallString = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "' + (Join-Path $dest 'Kaldir.ps1') + '"'
              URLInfoAbout = 'https://github.com/bdenizkarakoc/Aktarim' }
   foreach ($k in $vals.Keys) { Set-ItemProperty -Path $key -Name $k -Value $vals[$k] }
@@ -83,11 +94,12 @@ try {
 
   # --- guvenlik duvari: telefonun baglanabilmesi icin (yalniz ozel ag) ---
   & netsh advfirewall firewall delete rule name="Aktarim" | Out-Null
-  & netsh advfirewall firewall add rule name="Aktarim" dir=in action=allow protocol=TCP localport=8765 profile=private | Out-Null
+  & netsh advfirewall firewall add rule name="Aktarim" dir=in action=allow protocol=TCP localport=47800-47809 profile=private | Out-Null
 
   Write-Host ''
   Write-Host "Kuruldu: $dest" -ForegroundColor Green
-  Write-Host "Baslat menusunde ve masaustunde '$name' kisayolu var. Program simdi aciliyor..." -ForegroundColor Green
+  Write-Host "Baslat menusunde ve masaustunde '$name' kisayolu var; saat yaninda simgesi gorunur." -ForegroundColor Green
+  Write-Host 'Program simdi aciliyor...' -ForegroundColor Green
   # yonetici olmadan baslat (Gezgin uzerinden)
   Start-Process explorer.exe -ArgumentList "`"$desktopLnk`""
   Start-Sleep -Seconds 3

@@ -13,9 +13,10 @@ $dest = Join-Path $env:ProgramFiles 'Aktarim'
 $answer = Read-Host "$name kaldirilsin mi? Aktarilan dosyalarin silinmez. (E/H)"
 if ($answer -notmatch '^[eEyY]') { return }
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
-  Where-Object { $_.CommandLine -like '*Program Files\Aktarim\Aktarim.ps1*' } |
+  Where-Object { $_.CommandLine -like '*Aktarim.ps1*' -and $_.ProcessId -ne $PID } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 foreach ($p in @((Join-Path ([Environment]::GetFolderPath('CommonPrograms')) "$name.lnk"),
+                 (Join-Path ([Environment]::GetFolderPath('CommonStartup')) "$name.lnk"),
                  (Join-Path ([Environment]::GetFolderPath('CommonDesktopDirectory')) "$name.lnk"))) {
   if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Force }
 }

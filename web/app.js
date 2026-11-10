@@ -1,5 +1,6 @@
 "use strict";
-// Aktarım — telefon ve bilgisayar için tek sayfa. Dinamik metinler yalnızca textContent ile yazılır.
+// Aktarım — bilgisayar penceresi ve telefon için tek sayfa.
+// Dinamik metin yalnızca textContent ile yazılır; innerHTML yalnızca aşağıdaki sabit SVG'ler için kullanılır.
 
 const $ = (s) => document.querySelector(s);
 const el = (tag, cls, text) => {
@@ -8,18 +9,101 @@ const el = (tag, cls, text) => {
   if (text != null) n.textContent = text;
   return n;
 };
-const isMobile = /iPhone|iPad|Android|Mobile/i.test(navigator.userAgent);
-const isIOS = /iPhone|iPad/i.test(navigator.userAgent) || (navigator.userAgent.includes("Macintosh") && "ontouchend" in document);
+const UA = navigator.userAgent;
+const isIOS = /iPhone|iPad/i.test(UA) || (UA.includes("Macintosh") && "ontouchend" in document);
+const isMobile = isIOS || /Android|Mobile/i.test(UA);
 
-const state = { data: null, version: -1, filter: "all", tab: "items", seen: new Set(), first: true };
-const TITLES = { items: "Paylaşılanlar", send: "Gönder", bin: "Sonradan Sil", connect: "Bağlan" };
-const DAYS_LABEL = { 7: "1 hafta", 14: "2 hafta", 30: "1 ay" };
+// ---------- simgeler (sabit) ----------
+const ICONS = {
+  upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
+  inbox: '<path d="M4 13l2.5-7.5A2 2 0 0 1 8.4 4h7.2a2 2 0 0 1 1.9 1.5L20 13"/><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5h-4.5l-1.5 2.5h-4L8.5 13z"/>',
+  plane: '<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  laptop: '<rect x="4" y="5" width="16" height="11" rx="1.5"/><path d="M2 19h20"/>',
+  photo: '<rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>',
+  video: '<rect x="2.5" y="6" width="13" height="12" rx="2.5"/><path d="M15.5 10.5L21 7v10l-5.5-3.5z"/>',
+  doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  file: '<path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/>',
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  camera: '<path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><circle cx="12" cy="13" r="3.5"/>',
+  text: '<path d="M5 6h14M5 11h14M5 16h9"/>',
+  clip: '<rect x="7" y="4" width="10" height="4" rx="1"/><path d="M8 6H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-2"/>',
+  audio: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  zip: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M11 3v2h2v2h-2v2h2v2h-2"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  save: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
+  link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+  restore: '<path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  play: '<path d="M8 5l11 7-11 7z" fill="currentColor"/>',
+  check: '<path d="M5 12l5 5 9-10"/>',
+  qr: '<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2h-2zM18 18h2v2h-2zM14 18h2M18 14h2"/>',
+};
+function icon(name) {
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("viewBox", "0 0 24 24");
+  s.setAttribute("class", "i");
+  s.setAttribute("aria-hidden", "true");
+  s.innerHTML = ICONS[name] || ICONS.file;
+  return s;
+}
+
+// ---------- çizimler (sabit) ----------
+const LAPTOP = '<rect x="38" y="30" width="96" height="62" rx="7" fill="#fff" stroke="#c7d6f5" stroke-width="2"/><rect x="45" y="37" width="82" height="48" rx="3" fill="#e8f0ff"/><path d="M26 96h120l-6 8H32z" fill="#c7d6f5"/>';
+const PHONE = '<rect x="158" y="34" width="40" height="72" rx="9" fill="#fff" stroke="#c7d6f5" stroke-width="2"/><rect x="163" y="42" width="30" height="54" rx="3" fill="#e8f0ff"/><rect x="172" y="37" width="12" height="2.5" rx="1.25" fill="#c7d6f5"/>';
+const ART = {
+  send: `<svg viewBox="0 0 220 130"><circle cx="110" cy="66" r="62" fill="#007aff" opacity=".08"/>${LAPTOP}${PHONE}
+    <rect x="58" y="47" width="22" height="17" rx="3" fill="#ff9500"/><rect x="84" y="47" width="22" height="17" rx="3" fill="#ff2d55"/><rect x="58" y="67" width="48" height="6" rx="3" fill="#5856d6" opacity=".6"/>
+    <path d="M118 70c18-26 34-26 46-14" fill="none" stroke="#007aff" stroke-width="3" stroke-dasharray="5 5" stroke-linecap="round"/><path d="M160 49l6 8-10 1" fill="none" stroke="#007aff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="167" y="52" width="22" height="16" rx="3" fill="#ff9500"/><rect x="167" y="72" width="22" height="16" rx="3" fill="#34c759"/></svg>`,
+  inbox: `<svg viewBox="0 0 220 130"><circle cx="110" cy="66" r="62" fill="#34c759" opacity=".09"/>
+    <path d="M62 70l14-34h68l14 34v30a6 6 0 0 1-6 6H68a6 6 0 0 1-6-6z" fill="#fff" stroke="#bfe8cb" stroke-width="2"/><path d="M62 70h30l6 10h24l6-10h30" fill="none" stroke="#bfe8cb" stroke-width="2"/>
+    <rect x="92" y="20" width="36" height="28" rx="4" fill="#007aff" opacity=".9"/><circle cx="102" cy="30" r="3.5" fill="#fff"/><path d="M96 44l9-8 6 5 5-4 8 7" fill="none" stroke="#fff" stroke-width="2"/>
+    <path d="M110 52v14M104 60l6 6 6-6" fill="none" stroke="#34c759" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  sent: `<svg viewBox="0 0 220 130"><circle cx="110" cy="66" r="62" fill="#5856d6" opacity=".08"/>
+    <path d="M58 70l104-40-30 74-18-26z" fill="#fff" stroke="#d3d2f5" stroke-width="2" stroke-linejoin="round"/><path d="M114 78l48-48" stroke="#d3d2f5" stroke-width="2"/>
+    <path d="M40 92c14 4 26 2 38-8" fill="none" stroke="#5856d6" stroke-width="3" stroke-dasharray="4 6" stroke-linecap="round" opacity=".6"/></svg>`,
+  bin: `<svg viewBox="0 0 220 130"><circle cx="110" cy="66" r="62" fill="#ff9500" opacity=".09"/>
+    <path d="M80 44h60l-5 60a6 6 0 0 1-6 5H91a6 6 0 0 1-6-5z" fill="#fff" stroke="#ffd9a6" stroke-width="2"/><rect x="74" y="36" width="72" height="9" rx="4.5" fill="#ffd9a6"/>
+    <circle cx="146" cy="88" r="20" fill="#ff9500"/><path d="M146 78v10l7 4" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/></svg>`,
+  drop: `<svg viewBox="0 0 220 130">${LAPTOP}${PHONE}<path d="M110 8v30M100 28l10 10 10-10" fill="none" stroke="#007aff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+};
+document.querySelectorAll("[data-art]").forEach((n) => (n.innerHTML = ART[n.dataset.art]));
+document.querySelectorAll("[data-icon]").forEach((n) => n.append(icon(n.dataset.icon)));
+
+// ---------- durum ----------
+const state = { data: null, version: -1, tab: "send", device: isMobile ? (isIOS ? "iPhone" : "Android") : "Bilgisayar",
+  local: false, filters: { inbox: "all", sent: "all" }, first: true, known: new Set() };
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem("aktarim." + k)) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("aktarim." + k, JSON.stringify(v)); } catch { /* özel pencere */ } },
+};
+const seen = new Set(store.get("seen", []));
+const DAYS = { 7: "1 hafta", 14: "2 hafta", 30: "1 ay" };
+const FILTERS = [["all", "Tümü"], ["photo", "Fotoğraf"], ["video", "Video"], ["doc", "Belge"], ["text", "Yazı"]];
+
+const TABS = [
+  { id: "send", label: "Gönder", icon: "upload" },
+  { id: "inbox", label: "Gelenler", icon: "inbox" },
+  { id: "sent", label: "Gönderdiklerim", icon: "plane" },
+  { id: "bin", label: "Sonradan Sil", icon: "trash" },
+  { id: "connect", label: "Telefon Bağla", icon: "qr", pc: true },
+];
+const other = () => (isMobile ? "bilgisayar" : "telefon");
+const LEADS = {
+  send: () => `Fotoğraf, video, belge, yazı… ne istersen ${other()}a gönder.`,
+  inbox: () => `${isMobile ? "Bilgisayardan" : "Telefondan"} sana gelenler.`,
+  sent: () => `${isMobile ? "Bilgisayara" : "Telefona"} gönderdiklerin.`,
+  bin: () => "",
+  connect: () => "Telefonunu bu bilgisayara bağla.",
+};
 
 // ---------- yardımcılar ----------
 async function api(path, body) {
-  const opt = body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-  };
+  const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
   const r = await fetch(path, { credentials: "same-origin", cache: "no-store", ...opt });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || r.statusText);
@@ -30,9 +114,10 @@ function toast(msg) {
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(toast.t);
-  toast.t = setTimeout(() => t.classList.remove("show"), 2400);
+  toast.t = setTimeout(() => t.classList.remove("show"), 2600);
 }
 function size(n) {
+  if (!n) return "0 B";
   if (n < 1024) return n + " B";
   const u = ["KB", "MB", "GB"];
   let i = -1;
@@ -46,6 +131,13 @@ function when(ts) {
   const y = new Date(now); y.setDate(now.getDate() - 1);
   if (d.toDateString() === y.toDateString()) return "Dün " + hm;
   return d.toLocaleDateString("tr-TR", { day: "numeric", month: "short" }) + " " + hm;
+}
+function ago(ts) {
+  const s = Date.now() / 1000 - ts;
+  if (s < 15) return "Şimdi bağlı";
+  if (s < 3600) return Math.max(1, Math.round(s / 60)) + " dk önce";
+  if (s < 86400) return Math.round(s / 3600) + " sa önce";
+  return Math.round(s / 86400) + " gün önce";
 }
 function left(exp) {
   const s = exp - Date.now() / 1000;
@@ -62,32 +154,76 @@ function kind(it) {
   if (/zip|rar|7z|tar|gzip/.test(m)) return "zip";
   return "doc";
 }
-const ICON = { text: "✎", photo: "▣", video: "▶", audio: "♪", zip: "▤", doc: "▧" };
+const COLOR = { photo: "", video: "pink", doc: "purple", audio: "teal", zip: "gray", text: "orange" };
+const ICON_OF = { photo: "photo", video: "video", doc: "doc", audio: "audio", zip: "zip", text: "text" };
 const fileUrl = (it, dl) => `/api/file/${it.id}/${encodeURIComponent(it.name)}${dl ? "?dl=1" : ""}`;
-const viewable = (it) => kind(it) === "photo" && !/heic|heif/i.test(it.mime || "") || kind(it) === "video";
+const canShow = (it) => kind(it) === "photo" && !/heic|heif/i.test(it.mime || "");
+const mine = (it) => it.source === state.device;
+const matches = (it, f) => f === "all" || kind(it) === f || (f === "doc" && ["doc", "zip", "audio"].includes(kind(it)));
+const isUrl = (t) => /^https?:\/\/\S+$/.test((t || "").trim());
 
 // ---------- sekmeler ----------
+function buildNav() {
+  const side = $("#side-nav"), bar = $("#tabbar");
+  side.replaceChildren(); bar.replaceChildren();
+  TABS.forEach((t) => {
+    const mk = () => {
+      const b = el("button");
+      b.dataset.tab = t.id;
+      b.append(icon(t.icon), el("span", "", t.label));
+      const badge = el("em"); badge.hidden = true; badge.dataset.badge = t.id;
+      b.append(badge);
+      b.addEventListener("click", () => setTab(t.id));
+      return b;
+    };
+    side.append(mk());
+    if (!t.pc) bar.append(mk());
+  });
+}
 function setTab(tab) {
   state.tab = tab;
   document.querySelectorAll(".page").forEach((p) => (p.hidden = p.dataset.page !== tab));
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
-  $("#title").textContent = TITLES[tab];
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  const t = TABS.find((x) => x.id === tab);
+  $("#title").textContent = t.label;
+  $("#lead").textContent = LEADS[tab]();
   if (tab === "connect") drawQR();
+  if (tab === "inbox") setTimeout(markSeen, 1500);
   window.scrollTo(0, 0);
 }
-$("#tabs").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (b) setTab(b.dataset.tab);
-});
-$("#filter").addEventListener("click", (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  state.filter = b.dataset.f;
-  document.querySelectorAll("#filter button").forEach((x) => x.classList.toggle("on", x === b));
+function markSeen() {
+  if (state.tab !== "inbox" || !state.data) return;
+  state.data.items.filter((i) => !mine(i)).forEach((i) => seen.add(i.id));
+  store.set("seen", [...seen].slice(-2000));
   render();
-});
+}
+function buildFilters() {
+  document.querySelectorAll("[data-filter]").forEach((box) => {
+    const key = box.dataset.filter;
+    FILTERS.forEach(([f, label]) => {
+      const b = el("button", f === "all" ? "on" : "", label);
+      b.addEventListener("click", () => {
+        state.filters[key] = f;
+        box.querySelectorAll("button").forEach((x) => x.classList.toggle("on", x === b));
+        render();
+      });
+      box.append(b);
+    });
+  });
+  const ret = $("#retention");
+  [7, 14, 30].forEach((d) => {
+    const b = el("button", "", DAYS[d]);
+    b.dataset.d = d;
+    b.addEventListener("click", async () => {
+      await api("/api/settings", { retention_days: d });
+      toast(`Varsayılan süre: ${DAYS[d]}`);
+      refresh(true);
+    });
+    ret.append(b);
+  });
+}
 
-// ---------- işlem sayfası (iOS action sheet) ----------
+// ---------- işlem sayfası ve görüntüleyici ----------
 function sheet(title, actions) {
   const back = $("#sheet-back"), box = $("#sheet-actions");
   $("#sheet-title").textContent = title;
@@ -101,16 +237,28 @@ function sheet(title, actions) {
 }
 $("#sheet-cancel").addEventListener("click", () => ($("#sheet-back").hidden = true));
 $("#sheet-back").addEventListener("click", (e) => { if (e.target.id === "sheet-back") e.currentTarget.hidden = true; });
-
-function viewer(node) {
+function viewer(name, node) {
+  $("#viewer-name").textContent = name;
   $("#viewer-body").replaceChildren(node);
   $("#viewer").hidden = false;
 }
-$("#viewer-close").addEventListener("click", () => {
-  $("#viewer").hidden = true;
-  $("#viewer-body").replaceChildren();
-});
+function closeViewer() { $("#viewer").hidden = true; $("#viewer-body").replaceChildren(); }
+$("#viewer-close").addEventListener("click", closeViewer);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeViewer(); $("#sheet-back").hidden = true; } });
 
+function openItem(it) {
+  const k = kind(it);
+  if (k === "text") return viewer("Yazı", el("pre", "", it.text));
+  if (canShow(it)) { const img = el("img"); img.src = fileUrl(it); img.alt = it.name; return viewer(it.name, img); }
+  if (k === "video") {
+    const v = el("video"); v.src = fileUrl(it); v.controls = true; v.playsInline = true; v.autoplay = true;
+    return viewer(it.name, v);
+  }
+  if (k === "audio") { const a = el("audio"); a.src = fileUrl(it); a.controls = true; a.autoplay = true; return viewer(it.name, a); }
+  if (/pdf|text\/plain/.test(it.mime || "")) { const f = el("iframe"); f.src = fileUrl(it); return viewer(it.name, f); }
+  if (state.local) return reveal(it);
+  window.open(fileUrl(it), "_blank");
+}
 function download(it) {
   const a = el("a");
   a.href = fileUrl(it, true);
@@ -120,54 +268,25 @@ function download(it) {
   a.remove();
   if (isIOS) toast("İndirilenler → Dosyalar uygulamasında");
 }
-async function copyText(text) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    const t = el("textarea");
-    t.value = text;
-    t.style.position = "fixed"; t.style.opacity = "0";
-    document.body.append(t);
-    t.select();
-    t.setSelectionRange(0, text.length);
-    document.execCommand("copy");
-    t.remove();
-  }
-  toast("Kopyalandı");
-}
-async function shareFile(it) {
+async function saveToPhotos(it) {
   try {
     const blob = await (await fetch(fileUrl(it))).blob();
     const file = new File([blob], it.name, { type: it.mime });
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      await navigator.share({ files: [file] });
-      return;
-    }
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
   } catch (e) { if (e && e.name === "AbortError") return; }
   openItem(it);
   toast("Görsele basılı tut → “Fotoğraflara Ekle”");
 }
-function openItem(it) {
-  const k = kind(it);
-  if (k === "text") {
-    const pre = el("pre", "", it.text);
-    return viewer(pre);
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); } catch {
+    const t = el("textarea"); t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+    document.body.append(t); t.select(); t.setSelectionRange(0, text.length); document.execCommand("copy"); t.remove();
   }
-  if (k === "photo" && viewable(it)) {
-    const img = el("img"); img.src = fileUrl(it); img.alt = it.name;
-    return viewer(img);
-  }
-  if (k === "video") {
-    const v = el("video"); v.src = fileUrl(it); v.controls = true; v.playsInline = true; v.autoplay = true;
-    return viewer(v);
-  }
-  if (/pdf|text\/plain/.test(it.mime || "")) {
-    const f = el("iframe"); f.src = fileUrl(it);
-    return viewer(f);
-  }
-  window.open(fileUrl(it), "_blank");
+  toast("Kopyalandı");
 }
-
+async function reveal(it) {
+  try { await api("/api/reveal", { id: it.id }); } catch (e) { toast(e.message); }
+}
 function laterMenu(it) {
   sheet(`“${it.name}” ne zaman silinsin? Bu süre içinde Sonradan Sil'den geri yükleyebilirsin.`, [
     ["1 hafta sonra sil", () => softDelete(it, 7)],
@@ -178,7 +297,7 @@ function laterMenu(it) {
 }
 async function softDelete(it, days) {
   await api("/api/delete", { id: it.id, days });
-  toast(`Sonradan Sil'e taşındı · ${DAYS_LABEL[days]} sonra silinecek`);
+  toast(`Sonradan Sil'e taşındı · ${DAYS[days]} sonra silinecek`);
   refresh(true);
 }
 async function purge(it) {
@@ -187,125 +306,214 @@ async function purge(it) {
   toast("Kalıcı olarak silindi");
   refresh(true);
 }
-
-function itemMenu(it) {
-  const k = kind(it), acts = [];
-  if (k === "text") {
-    acts.push(["Kopyala", () => copyText(it.text)], ["Aç", () => openItem(it)]);
-    if (/^https?:\/\/\S+$/.test(it.text)) acts.push(["Bağlantıyı aç", () => window.open(it.text, "_blank")]);
-  } else {
-    acts.push(["Aç", () => openItem(it)]);
-    if (isMobile && (k === "photo" || k === "video")) acts.push([isIOS ? "Fotoğraflara kaydet" : "Galeriye kaydet", () => (isIOS ? shareFile(it) : download(it))]);
-    acts.push([isMobile ? "Dosyalara indir" : "Bilgisayara indir", () => download(it)]);
-  }
-  acts.push(["Sonradan sil…", () => laterMenu(it), true]);
-  sheet(`${it.name} · ${it.source || ""} · ${when(it.created)}`, acts);
+async function restore(it) {
+  await api("/api/restore", { id: it.id });
+  toast("Geri yüklendi");
+  refresh(true);
 }
-function binMenu(it) {
-  sheet(`${it.name} · ${left(it.expires_at)}`, [
-    ["Geri yükle", async () => { await api("/api/restore", { id: it.id }); toast("Geri yüklendi"); refresh(true); }],
+
+// ---------- çizim ----------
+function actionsFor(it) {
+  const k = kind(it), a = [];
+  if (k === "text") {
+    a.push(["copy", "Kopyala", () => copyText(it.text)]);
+    if (isUrl(it.text)) a.push(["link", "Aç", () => window.open(it.text.trim(), "_blank")]);
+    else a.push(["eye", "Göster", () => openItem(it)]);
+  } else {
+    a.push(["eye", "Aç", () => openItem(it)]);
+    if (state.local) a.push(["folder", "Klasörde", () => reveal(it)]);
+    else if (isIOS && (k === "photo" || k === "video")) a.push(["save", "Kaydet", () => saveToPhotos(it)]);
+    else a.push(["save", "İndir", () => download(it)]);
+  }
+  a.push(["trash", "Sil", () => laterMenu(it), true]);
+  return a;
+}
+function thumb(it) {
+  const k = kind(it), t = el("button", "thumb");
+  if (k === "text") {
+    t.classList.add("text");
+    t.textContent = it.text.slice(0, 220);
+  } else if (canShow(it)) {
+    const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = "";
+    t.append(img);
+  } else if (k === "video") {
+    const v = el("video"); v.src = fileUrl(it) + "#t=0.5"; v.muted = true; v.playsInline = true; v.preload = "metadata";
+    const p = el("span", "play"); p.append(icon("play"));
+    t.append(v, p);
+  } else {
+    const b = el("span", "ic-badge " + (COLOR[k] || "")); b.append(icon(ICON_OF[k] || "file"));
+    const ext = (it.name.split(".").pop() || "").slice(0, 5);
+    t.append(b);
+    if (ext && ext !== it.name) t.append(el("span", "ext", ext));
+  }
+  t.addEventListener("click", () => openItem(it));
+  return t;
+}
+function card(it, isNew) {
+  const c = el("div", "item");
+  if (isNew) c.append(el("span", "new", "Yeni"));
+  c.append(thumb(it));
+  const m = el("div", "meta");
+  m.append(el("b", "", it.kind === "text" ? (isUrl(it.text) ? "Bağlantı" : "Yazı") : it.name),
+    el("small", "", `${it.source || ""} · ${when(it.created)}${it.kind === "file" ? " · " + size(it.size) : ""}`));
+  const acts = el("div", "acts");
+  actionsFor(it).forEach(([ic, label, fn, red]) => {
+    const b = el("button", red ? "red" : "");
+    b.append(icon(ic), el("span", "", label));
+    b.title = label;
+    b.addEventListener("click", fn);
+    acts.append(b);
+  });
+  c.append(m, acts);
+  return c;
+}
+function binRow(it) {
+  const r = el("div", "row");
+  const ic = el("span", "ic-badge " + (COLOR[kind(it)] || ""));
+  if (canShow(it)) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = ""; ic.append(img); }
+  else ic.append(icon(ICON_OF[kind(it)] || "file"));
+  const main = el("div", "main-t");
+  const soon = it.expires_at - Date.now() / 1000 < 2 * 86400;
+  const sub = el("div", "sub" + (soon ? " soon" : ""));
+  sub.append(icon("clock"), el("span", "", `${left(it.expires_at)}${it.kind === "file" ? " · " + size(it.size) : ""}`));
+  main.append(el("div", "name", it.kind === "text" ? it.text.replace(/\s+/g, " ").slice(0, 80) : it.name), sub);
+  const back = el("button", "btn soft", "Geri yükle");
+  back.addEventListener("click", () => restore(it));
+  const more = el("button", "more"); more.append(icon("more")); more.title = "Diğer";
+  more.addEventListener("click", () => sheet(`${it.name} · ${left(it.expires_at)}`, [
+    ["Geri yükle", () => restore(it)],
     ["Süreyi 1 hafta yap", () => softDelete(it, 7)],
     ["Süreyi 2 hafta yap", () => softDelete(it, 14)],
     ["Süreyi 1 ay yap", () => softDelete(it, 30)],
     ["Kalıcı olarak sil", () => purge(it), true],
-  ]);
-}
-
-// ---------- çizim ----------
-function row(it, sub, onClick, extra) {
-  const r = el("button", "row");
-  const ic = el("span", "ic " + kind(it));
-  if (kind(it) === "photo" && viewable(it)) {
-    const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = "";
-    ic.append(img);
-  } else ic.textContent = ICON[kind(it)];
-  const main = el("span", "main");
-  main.append(el("div", "name", it.kind === "text" ? it.text.replace(/\s+/g, " ").slice(0, 120) : it.name), el("div", "sub", sub));
-  r.append(ic, main, extra || el("span", "chev", "›"));
-  r.addEventListener("click", onClick);
+  ]));
+  r.append(ic, main, back, more);
   return r;
 }
-function tile(it) {
-  const t = el("button", "tile");
-  const k = kind(it);
-  if (k === "photo" && viewable(it)) {
-    const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = it.name;
-    t.append(img);
-  } else if (k === "video") {
-    const v = el("video"); v.src = fileUrl(it) + "#t=0.1"; v.muted = true; v.playsInline = true; v.preload = "metadata";
-    t.append(v, el("span", "badge", "▶ " + size(it.size)));
-  } else t.append(el("span", "badge", it.name));
-  if (it.source) t.append(el("span", "src", it.source));
-  t.addEventListener("click", () => itemMenu(it));
-  return t;
+function setBadge(tab, n) {
+  document.querySelectorAll(`[data-badge="${tab}"]`).forEach((b) => { b.hidden = !n; b.textContent = n; });
+}
+function renderDevices(d) {
+  const box = $("#devices");
+  box.replaceChildren(el("b", "", "Bağlı cihazlar"));
+  const phones = (d.devices || []).filter((x) => x.name !== "Bilgisayar").sort((a, b) => b.last_seen - a.last_seen);
+  if (!phones.length) {
+    box.append(el("div", "dev", "Henüz telefon bağlanmadı"));
+    const b = el("button", "btn soft", "Telefon bağla");
+    b.addEventListener("click", () => setTab("connect"));
+    box.append(b);
+    return;
+  }
+  phones.forEach((p) => {
+    const on = Date.now() / 1000 - p.last_seen < 15;
+    const r = el("div", "dev" + (on ? " on" : ""));
+    r.append(icon("phone"), el("span", "", p.name), el("small", "", ago(p.last_seen)));
+    box.append(r);
+  });
 }
 function render() {
   const d = state.data;
   if (!d) return;
-  const f = state.filter;
-  const items = d.items.filter((it) => f === "all" || kind(it) === f || (f === "doc" && ["doc", "zip", "audio"].includes(kind(it))));
-  const media = items.filter((it) => ["photo", "video"].includes(kind(it)));
-  const rest = items.filter((it) => !media.includes(it));
-  $("#photos").replaceChildren(...media.map(tile));
-  $("#list").replaceChildren(...rest.map((it) => row(it, `${it.source || ""} · ${when(it.created)} · ${size(it.size)}`, () => itemMenu(it))));
-  $("#empty").hidden = items.length > 0;
-
-  $("#bin").replaceChildren(...d.bin.map((it) => {
-    const restoreBtn = el("span", "act", "Geri yükle");
-    restoreBtn.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      await api("/api/restore", { id: it.id });
-      toast("Geri yüklendi");
-      refresh(true);
-    });
-    return row(it, `${left(it.expires_at)} · ${size(it.size)}`, () => binMenu(it), restoreBtn);
-  }));
+  const incoming = d.items.filter((i) => !mine(i));
+  const outgoing = d.items.filter(mine);
+  const fi = incoming.filter((i) => matches(i, state.filters.inbox));
+  const fo = outgoing.filter((i) => matches(i, state.filters.sent));
+  $("#inbox").replaceChildren(...fi.map((i) => card(i, !seen.has(i.id))));
+  $("#inbox-empty").hidden = fi.length > 0;
+  $("#sent").replaceChildren(...fo.map((i) => card(i, false)));
+  $("#sent-empty").hidden = fo.length > 0;
+  setBadge("inbox", incoming.filter((i) => !seen.has(i.id)).length);
+  $("#bin").replaceChildren(...d.bin.map(binRow));
   $("#bin-empty").hidden = d.bin.length > 0;
   $("#empty-bin").hidden = d.bin.length === 0;
-  const c = $("#bin-count");
-  c.hidden = d.bin.length === 0;
-  c.textContent = d.bin.length;
+  setBadge("bin", d.bin.length);
   document.querySelectorAll("#retention button").forEach((b) => b.classList.toggle("on", +b.dataset.d === d.retention_days));
+  renderDevices(d);
 }
 
 // ---------- veri ----------
+function setStatus(ok, text) {
+  $("#status").classList.toggle("off", !ok);
+  $("#status b").textContent = text;
+}
 async function refresh(force) {
   try {
     if (!force && state.data) {
       const v = await api("/api/version");
-      $("#status").classList.remove("off");
-      $("#status b").textContent = "Bağlı";
-      if (v.version === state.version) return;
+      setStatus(true, "Bağlı");
+      if (v.version === state.version) { if (!isMobile) renderDevices(state.data); return; }
     }
     const d = await api("/api/items");
-    $("#status").classList.remove("off");
-    $("#status b").textContent = "Bağlı";
-    const fresh = d.items.filter((it) => !state.seen.has(it.id) && it.source !== state.device);
+    setStatus(true, "Bağlı");
+    const fresh = d.items.filter((i) => !mine(i) && !state.known.has(i.id));
     if (!state.first && fresh.length) {
       const from = [...new Set(fresh.map((i) => i.source))].join(", ");
-      toast(`${from}: ${fresh.length} yeni öğe`);
+      toast(`${from}: ${fresh.length} yeni öğe geldi`);
     }
-    d.items.forEach((it) => state.seen.add(it.id));
+    d.items.forEach((i) => state.known.add(i.id));
     state.first = false;
     state.data = d;
     state.version = d.version;
     render();
   } catch (e) {
-    $("#status").classList.add("off");
-    $("#status b").textContent = /anahtar/.test(e.message) ? "Yeniden okut" : "Bağlantı yok";
+    setStatus(false, /anahtar/.test(e.message) ? "QR kodu yeniden okut" : "Bağlantı yok");
   }
 }
 
 // ---------- gönderme ----------
+const PICKS = [
+  { id: "in-photo", icon: "photo", color: "", label: "Fotoğraf", sub: isIOS ? "Fotoğraf Arşivi'nden" : "Galeriden" },
+  { id: "in-video", icon: "video", color: "pink", label: "Video", sub: "Bir ya da birden çok" },
+  { id: "in-doc", icon: "doc", color: "purple", label: "Belge", sub: "PDF, Word, Excel…" },
+  { id: "in-any", icon: "file", color: "teal", label: "Herhangi bir dosya", sub: isIOS ? "Dosyalar uygulamasından" : "Ne olursa" },
+  { id: "in-cam", icon: "camera", color: "green", label: "Kamera", sub: "Çek ve gönder", mobile: true },
+  { id: "in-folder", icon: "folder", color: "orange", label: "Klasör", sub: "İçindekilerin hepsi", pc: true },
+  { id: "clip", icon: "clip", color: "gray", label: "Panodan", sub: "Kopyaladığın görsel/yazı", pc: true },
+];
+function buildPicks() {
+  const folder = el("input"); folder.type = "file"; folder.id = "in-folder"; folder.multiple = true; folder.hidden = true;
+  folder.setAttribute("webkitdirectory", "");
+  document.body.append(folder);
+  const grid = $("#pick-grid");
+  PICKS.filter((p) => (isMobile ? !p.pc : !p.mobile)).forEach((p) => {
+    const b = el("button", "pick");
+    const ic = el("span", "ic-badge " + p.color); ic.append(icon(p.icon));
+    b.append(ic, el("b", "", p.label), el("small", "", p.sub));
+    b.addEventListener("click", () => (p.id === "clip" ? pasteFromClipboard() : $("#" + p.id).click()));
+    grid.append(b);
+  });
+  ["in-photo", "in-video", "in-doc", "in-any", "in-cam", "in-folder"].forEach((id) => {
+    $("#" + id).addEventListener("change", (e) => {
+      uploadAll([...e.target.files].map((f) => ({ file: f, name: (f.webkitRelativePath || f.name).replace(/\//g, " - ") })));
+      e.target.value = "";
+    });
+  });
+}
+async function pasteFromClipboard() {
+  try {
+    const items = await navigator.clipboard.read();
+    const files = [];
+    for (const ci of items) {
+      const img = ci.types.find((t) => t.startsWith("image/"));
+      if (img) { const b = await ci.getType(img); files.push({ file: b, name: `Panodan ${new Date().toLocaleString("tr-TR").replace(/[/:]/g, ".")}.png` }); }
+    }
+    if (files.length) return uploadAll(files);
+    const text = await navigator.clipboard.readText();
+    if (text.trim()) return sendText(text);
+    toast("Panoda gönderilecek bir şey yok");
+  } catch {
+    toast("Ctrl+V ile de yapıştırabilirsin");
+  }
+}
 function upload(file, name) {
   name = name || file.name || "dosya";
-  const r = el("div", "row");
-  const main = el("span", "main");
-  const bar = el("div", "bar"), fill = el("i");
-  bar.append(fill);
+  const r = el("div", "up");
+  const ic = el("span", "ic-badge"); ic.append(icon("upload"));
+  const main = el("div", "main-t");
+  const bar = el("div", "bar"), fill = el("i"); bar.append(fill);
   const sub = el("div", "sub", "Bekliyor · " + size(file.size));
   main.append(el("div", "name", name), sub, bar);
-  r.append(el("span", "ic doc", "⬆︎"), main);
+  r.append(ic, main);
   $("#uploads").prepend(r);
   return new Promise((resolve) => {
     const x = new XMLHttpRequest();
@@ -320,11 +528,12 @@ function upload(file, name) {
     };
     x.onload = () => {
       const ok = x.status === 201;
-      sub.textContent = ok ? "Gönderildi ✓" : "Hata: " + (JSON.parse(x.responseText || "{}").error || x.status);
+      let j = {}; try { j = JSON.parse(x.responseText || "{}"); } catch { /* boş */ }
+      sub.textContent = ok ? "Gönderildi" : "Hata: " + (j.error || x.status);
       fill.style.width = "100%";
-      if (!ok) fill.style.background = "var(--red)";
-      if (ok) state.seen.add(JSON.parse(x.responseText).id);
-      setTimeout(() => r.remove(), ok ? 4000 : 15000);
+      if (ok) { ic.replaceChildren(icon("check")); ic.classList.add("green"); state.known.add(j.id); }
+      else fill.style.background = "var(--red)";
+      setTimeout(() => r.remove(), ok ? 5000 : 20000);
       resolve(ok);
     };
     x.onerror = () => { sub.textContent = "Bağlantı koptu"; fill.style.background = "var(--red)"; resolve(false); };
@@ -332,24 +541,25 @@ function upload(file, name) {
   });
 }
 async function uploadAll(list) {
-  const files = [...list].filter(Boolean);
+  const files = list.filter(Boolean);
   if (!files.length) return;
   if (state.tab !== "send") setTab("send");
   let ok = 0;
-  for (const f of files) ok += (await upload(f.file || f, f.path)) ? 1 : 0;
-  toast(`${ok}/${files.length} öğe gönderildi`);
+  for (const f of files) ok += (await upload(f.file, f.name)) ? 1 : 0;
+  toast(ok === files.length ? `${ok} öğe gönderildi` : `${ok}/${files.length} öğe gönderildi`);
   refresh(true);
 }
-$("#pick").addEventListener("change", (e) => { uploadAll(e.target.files); e.target.value = ""; });
-$("#pick-cam").addEventListener("change", (e) => { uploadAll(e.target.files); e.target.value = ""; });
+async function sendText(text) {
+  const it = await api("/api/text", { text });
+  state.known.add(it.id);
+  toast("Yazı gönderildi");
+  refresh(true);
+}
 $("#send-text").addEventListener("click", async () => {
   const t = $("#text"), text = t.value.trim();
   if (!text) return t.focus();
-  const it = await api("/api/text", { text });
-  state.seen.add(it.id);
+  await sendText(text);
   t.value = "";
-  toast("Yazı gönderildi");
-  refresh(true);
 });
 
 // sürükle-bırak (klasörler dahil)
@@ -363,42 +573,28 @@ window.addEventListener("drop", async (e) => {
   dragDepth = 0;
   document.body.classList.remove("dragging");
   const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
-  if (!entries.length) return uploadAll(e.dataTransfer.files);
+  if (!entries.length) return uploadAll([...e.dataTransfer.files].map((f) => ({ file: f, name: f.name })));
   const out = [];
   const walk = (entry, prefix) => new Promise((res) => {
-    if (entry.isFile) return entry.file((f) => { out.push({ file: f, path: prefix + f.name }); res(); }, res);
+    if (entry.isFile) return entry.file((f) => { out.push({ file: f, name: prefix + f.name }); res(); }, res);
     const reader = entry.createReader(), all = [];
     const next = () => reader.readEntries(async (batch) => {
-      if (!batch.length) { for (const c of all) await walk(c, prefix + entry.name + "/"); return res(); }
+      if (!batch.length) { for (const c of all) await walk(c, prefix + entry.name + " - "); return res(); }
       all.push(...batch); next();
     }, res);
     next();
   });
   for (const en of entries) await walk(en, "");
-  uploadAll(out.map((o) => ({ file: o.file, path: o.path.replace(/\//g, " - ") })));
+  uploadAll(out);
 });
-
-// yapıştır: görsel/dosya ya da yazı
 window.addEventListener("paste", (e) => {
-  if (e.target.closest && e.target.closest("textarea, input")) {
-    const files = [...(e.clipboardData?.files || [])];
-    if (files.length) { e.preventDefault(); uploadAll(files.map((f, i) => ({ file: f, path: f.name === "image.png" ? `Yapıştırılan ${Date.now()}-${i}.png` : f.name }))); }
-    return;
-  }
-  const files = [...(e.clipboardData?.files || [])];
-  if (files.length) return uploadAll(files.map((f, i) => ({ file: f, path: f.name === "image.png" ? `Yapıştırılan ${Date.now()}-${i}.png` : f.name })));
+  const files = [...(e.clipboardData?.files || [])].map((f, i) => ({ file: f, name: f.name === "image.png" ? `Yapıştırılan ${Date.now()}-${i}.png` : f.name }));
+  if (files.length) { e.preventDefault(); return uploadAll(files); }
+  if (e.target.closest && e.target.closest("textarea, input")) return;
   const text = e.clipboardData?.getData("text");
-  if (text && text.trim()) api("/api/text", { text }).then((it) => { state.seen.add(it.id); toast("Yazı gönderildi"); refresh(true); });
+  if (text && text.trim()) sendText(text);
 });
 
-// ---------- Sonradan Sil ayarları ----------
-$("#retention").addEventListener("click", async (e) => {
-  const b = e.target.closest("button");
-  if (!b) return;
-  await api("/api/settings", { retention_days: +b.dataset.d });
-  toast(`Varsayılan süre: ${DAYS_LABEL[b.dataset.d]}`);
-  refresh(true);
-});
 $("#empty-bin").addEventListener("click", async () => {
   if (!confirm("Sonradan Sil kutusundaki her şey kalıcı olarak silinsin mi?")) return;
   const r = await api("/api/empty-bin", {});
@@ -413,31 +609,41 @@ function drawQR() {
   const url = $("#urls").value || info.urls[0];
   const box = $("#qr");
   box.replaceChildren();
-  if (window.QRCode) {
-    new window.QRCode(box, { text: url, width: 220, height: 220, correctLevel: window.QRCode.CorrectLevel.M });
-  } else {
-    box.append(el("div", "muted", "QR kodu yüklenemedi; bağlantıyı telefona elle yaz:"), el("b", "", url));
-  }
+  if (window.QRCode) new window.QRCode(box, { text: url, width: 230, height: 230, correctLevel: window.QRCode.CorrectLevel.M });
+  else box.append(el("div", "muted", "QR kodu yüklenemedi; bu bağlantıyı telefonda aç:"), el("b", "", url));
 }
 $("#urls").addEventListener("change", drawQR);
 $("#copy-url").addEventListener("click", () => copyText($("#urls").value));
 
 async function init() {
+  buildNav();
+  buildFilters();
+  buildPicks();
   info = await api("/api/info").catch(() => null);
   if (info) {
     state.device = info.device;
+    state.local = !!info.local;
     $("#device").textContent = info.device === "Bilgisayar" ? "Bu bilgisayar" : info.device;
     $("#urls").replaceChildren(...info.urls.map((u) => { const o = el("option", "", u); o.value = u; return o; }));
-    $("#data-dir").textContent = "Dosyalar bilgisayarda: " + info.data_dir;
+    $("#data-dir").textContent = "Dosyalar bu bilgisayarda: " + info.data_dir;
   }
   if (isMobile) {
-    $("#pick-hint").textContent = isIOS ? "Fotoğraf Arşivi, Dosyalar ya da Kamera" : "Galeri, Dosyalarım ya da Kamera";
+    $("#drop-title").textContent = "Bilgisayara gönder";
+    $("#drop-sub").textContent = "Aşağıdan fotoğraf, video ya da dosya seç; bilgisayarda anında görünür.";
+    $("#inbox-empty-sub").textContent = "Bilgisayarda Aktarım'a sürükleyip bıraktıkların burada görünür.";
   } else {
-    $("#pick-cam").previousElementSibling.hidden = true;
-    $("#pick-hint").textContent = "ya da dosyaları/klasörleri bu pencereye sürükle-bırak";
+    $("#inbox-empty-sub").textContent = "Telefonda Aktarım'ı açıp Gönder'e dokun; gönderdiklerin burada görünür.";
+  }
+  if (state.local) {
+    const b = el("button", "btn soft small"); b.append(icon("folder"), el("span", "", "Klasörü aç"));
+    b.addEventListener("click", () => api("/api/open-folder", {}).catch((e) => toast(e.message)));
+    $("#inbox-tools").append(b);
   }
   await refresh(true);
-  if (!isMobile && state.data && !state.data.items.length) setTab("connect");
+  const d = state.data;
+  if (!isMobile && d && !d.items.length && !(d.devices || []).some((x) => x.name !== "Bilgisayar")) setTab("connect");
+  else if (d && d.items.some((i) => !mine(i) && !seen.has(i.id))) setTab("inbox");
+  else setTab("send");
   setInterval(refresh, 2000);
   window.addEventListener("load", () => state.tab === "connect" && drawQR());
 }

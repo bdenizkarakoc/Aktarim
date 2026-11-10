@@ -1,90 +1,76 @@
-# Aktarım — bilgisayar ↔ telefon
+<p align="center"><img src="web/icon.svg" width="96" alt="Aktarım simgesi"></p>
+<h1 align="center">Aktarım</h1>
+<p align="center"><b>Bilgisayarınla telefonun arasında fotoğraf, video, belge, yazı… ne varsa gönder ve al.</b><br>
+iPhone ve Samsung (Android) ile çalışır · telefona uygulama yüklemek gerekmez · her şey evdeki ağda kalır</p>
 
-Bilgisayar ile **iPhone (iOS)** ve **Samsung / Android** telefon arasında fotoğraf, video, belge, dosya ve yazı
-gönderip alır. Telefona uygulama kurmak gerekmez: telefon aynı Wi-Fi ağındaki bilgisayara tarayıcıdan bağlanır.
-Arayüz iOS görünümündedir ve "Ana Ekrana Ekle" ile uygulama gibi açılır.
+<p align="center"><img src="docs/bilgisayar-gelenler.png" width="860" alt="Bilgisayardaki Aktarım penceresi: telefondan gelenler"></p>
 
-## Kurulum (Windows, tek satır)
+## Ne yapar?
 
-PowerShell'i aç, şunu yapıştır:
+| | |
+|---|---|
+| **Gönder** | Fotoğraf, video, belge, klasör, yazı ya da bağlantıyı pencereye sürükle bırak; telefonda anında görünür. |
+| **Gelenler** | Telefondan gönderdiklerin bilgisayarda **Gelenler**'e düşer, saat yanında bildirim çıkar. Dosyalar `Masaüstü\Aktarım\Gelenler` klasörüne gerçek adlarıyla kaydedilir. |
+| **Gönderdiklerim** | Karşı tarafa gönderdiğin her şey. |
+| **Sonradan Sil** | Sildiğin öğe hemen gitmez: **1 hafta**, **2 hafta** ya da **1 ay** bekler, bu sürede **geri yükleyebilirsin**. Süre dolunca kendiliğinden silinir. |
+| **Telefon Bağla** | QR kodu telefonun kamerasıyla okut, bağlan. |
 
-```powershell
-irm https://raw.githubusercontent.com/bdenizkarakoc/Aktarim/main/Kur.ps1 | iex
-```
+<p align="center">
+  <img src="docs/bilgisayar-gonder.png" width="860" alt="Gönder ekranı">
+</p>
 
-Yönetici izni sorulur (Evet de). Kurulum:
+### Telefonda
 
-- Programı **`C:\Program Files\Aktarim`** klasörüne kurar,
-- **Başlat menüsüne** ve **masaüstüne** *Aktarım* kısayolu koyar (kendi simgesiyle),
-- sağ tık → **Gönder** → *Telefona gönder (Aktarım)* seçeneğini ekler,
-- telefonun bağlanabilmesi için güvenlik duvarına izin verir (yalnızca özel ağ, TCP 8765),
-- **Ayarlar → Uygulamalar** listesine ekler; oradan *Kaldır* ile kaldırılır.
+<p align="center">
+  <img src="docs/iphone-gonder.png" width="210" alt="iPhone: Gönder">
+  <img src="docs/iphone-gelenler.png" width="210" alt="iPhone: Gelenler">
+  <img src="docs/iphone-sonradan-sil-sec.png" width="210" alt="iPhone: ne zaman silinsin">
+  <img src="docs/iphone-sonradan-sil.png" width="210" alt="iPhone: Sonradan Sil">
+</p>
 
-Aynı satırı yeniden çalıştırmak programı günceller. Telefonla aktarılan dosyalar program klasöründe değil,
-`Masaüstü\Aktarım` klasöründe durur; kaldırınca silinmez.
+## Kurulum (Windows 10 / 11)
 
-## Elle başlatma
+1. Başlat menüsüne **PowerShell** yaz, **Windows PowerShell**'i aç.
+2. Aşağıdaki satırı kopyalayıp pencereye yapıştır, **Enter**'a bas:
 
-1. Depoyu indir (Code → Download ZIP) ve klasörü aç.
-2. `Aktarim.bat` dosyasına çift tıkla. Bu, `Aktarim.ps1`'i Windows'un kendi PowerShell'iyle çalıştırır
-   (Python gerekmez). Ya da PowerShell'de:
-   ```powershell
-   cd Aktarim
-   powershell -ExecutionPolicy Bypass -File .\Aktarim.ps1
    ```
-3. Açılan pencerede **Bağlan** sekmesindeki QR kodunu telefonun kamerasıyla okut.
-4. Telefonda Safari (iPhone) / Chrome ya da Samsung Internet'te Paylaş → **Ana Ekrana Ekle**.
+   irm https://raw.githubusercontent.com/bdenizkarakoc/Aktarim/main/Kur.ps1 | iex
+   ```
+3. Yönetici izni sorulunca **Evet** de.
 
-Telefon bağlanamazsa güvenlik duvarına izin ver: Windows ilk açılışta sorarsa **Özel ağlar**'ı işaretle, sormazsa
-`.\Aktarim.ps1 -GuvenlikDuvari` (yönetici izni ister). Wi-Fi ağının Windows'ta **Özel** olarak ayarlı olması gerekir.
+Bu kadar. Aktarım **`C:\Program Files\Aktarim`** klasörüne kurulur ve kendi penceresinde açılır:
 
-PowerShell seçenekleri:
+- **Başlat menüsünde** ve **masaüstünde** *Aktarım* simgesi olur,
+- **saat yanında** simgesi durur (tıklayınca açılır; sağ tıkla klasörleri aç ya da kapat),
+- Windows açılınca arka planda kendiliğinden başlar, telefonun her zaman gönderebilir,
+- dosyaya sağ tık → **Gönder** → *Telefona gönder (Aktarım)*,
+- **Ayarlar → Uygulamalar**'dan kaldırılabilir (aktarılan dosyaların silinmez).
 
-| Komut | Ne yapar |
-|---|---|
-| `.\Aktarim.ps1` | Sunucuyu başlatır, tarayıcıyı açar |
-| `.\Aktarim.ps1 -Ekle dosya.pdf Klasor` | Dosyaları/klasörleri telefona gönderir |
-| `.\Aktarim.ps1 -GonderKur` | Sağ tık → Gönder → *Telefona gönder (Aktarım)* ekler |
-| `.\Aktarim.ps1 -GuvenlikDuvari` | Güvenlik duvarı kuralı ekler (özel ağ) |
-| `-Klasor D:\Aktarim` · `-Port 9000` · `-TarayiciAcma` | Veri klasörü, kapı, tarayıcı açmadan başlat |
+Güncellemek için aynı satırı yeniden çalıştırman yeterli.
 
-Python sürümü de aynı arayüzü ve aynı veri biçimini kullanır: `Aktarim-python.bat` ya da `python3 aktarim.py`
-(macOS/Linux: `Aktarim.command`).
+<p align="center"><img src="docs/bilgisayar-baglan.png" width="860" alt="Telefon Bağla ekranı"></p>
 
-## Kullanım
+## Telefonu bağlamak
 
-| Ne yapmak istiyorsun | Nasıl |
-|---|---|
-| Bilgisayardan telefona | Dosyaları/klasörleri pencereye **sürükle-bırak**, ya da Ctrl+V ile görsel/yazı yapıştır |
-| Sağ tıkla gönder (Windows) | Bir kez `.\Aktarim.ps1 -GonderKur` → dosyaya sağ tık → Gönder → *Telefona gönder (Aktarım)* |
-| Telefondan bilgisayara | **Gönder** sekmesi → fotoğraf/video/dosya seç, kamerayla çek ya da yazı yaz |
-| Telefona kaydet | Öğeye dokun → *Fotoğraflara kaydet* / *Galeriye kaydet* / *Dosyalara indir* |
-| Yazıyı/bağlantıyı al | Öğeye dokun → *Kopyala* ya da *Bağlantıyı aç* |
+1. Telefon ile bilgisayar **aynı Wi-Fi**'ye bağlı olsun.
+2. Aktarım'da **Telefon Bağla**'yı aç, QR kodu telefonun **Kamera**sıyla okut (Samsung'da Kamera ya da Google Lens).
+3. Açılan sayfayı uygulama gibi ekle: iPhone'da Safari → Paylaş → **Ana Ekrana Ekle**; Samsung'da menü → **Ana ekrana ekle**.
 
-Yeni gelen öğeler iki saniye içinde öbür cihazda görünür. Gelen dosyalar bilgisayarda `Masaüstü\Aktarım\files`
-klasöründe durur (`-Klasor` ile değiştirilebilir).
+**Bağlanmıyorsa:** Windows'ta Wi-Fi ağının **Özel** ağ olarak ayarlı olduğundan emin ol (Ayarlar → Ağ ve İnternet → Wi-Fi → ağ adı → *Özel ağ*).
 
-## Sonradan Sil
+## Bilmen gerekenler
 
-Silmek istediğin öğede **Sonradan sil…** → *1 hafta*, *2 hafta* ya da *1 ay* seç (ya da *Hemen kalıcı olarak sil*).
-Öğe **Sonradan Sil** sekmesine taşınır; süre dolana kadar **Geri yükle** ile geri alınabilir, süresi değiştirilebilir.
-Süre dolunca kendiliğinden kalıcı olarak silinir. Varsayılan süre aynı sekmeden ayarlanır.
+- Her şey yalnızca evdeki ağda kalır, internete bir şey yüklenmez. QR koddaki bağlantı gizli bir anahtar içerir; o bağlantı olmadan kimse göremez.
+- iPhone'da fotoğrafı kaydetmek için öğede **Kaydet**'e dokun; açılan görsele basılı tutup **Fotoğraflara Ekle**'yi seç.
+- AirDrop yalnızca Apple cihazları arasında çalıştığı için Aktarım telefonda tarayıcı üzerinden çalışır; böylece iPhone'da da Samsung'da da aynıdır.
+- Aktarım kendi kapısını (47800) kullanır; bilgisayardaki başka programlarla (ör. Reels Fabrikası) karışmaz.
 
-## Güvenlik
+---
 
-- Sunucu yalnızca yerel ağda çalışır; internete bir şey yüklenmez.
-- QR koddaki bağlantı gizli bir anahtar içerir; anahtarı olmayan cihaz hiçbir şeyi göremez.
-  Anahtarı değiştirmek için `Aktarım\ayarlar.json` içindeki `token` satırını sil ve programı yeniden başlat.
+<details><summary>Geliştiriciler için</summary>
 
-## Sınırlar
-
-- iPhone'un AirDrop'u yalnızca Apple cihazları arasında çalışır; Aktarım bunun yerine tarayıcı üzerinden çalışır.
-- iPhone'da yerel ağdaki (HTTPS olmayan) sayfalarda paylaşım menüsü açılmaz; *Fotoğraflara kaydet* görseli açar,
-  görsele basılı tutup **Fotoğraflara Ekle** de.
-- HEIC fotoğraflar Windows tarayıcısında önizlenmez ama indirilir.
-
-## Testler
-
-```bash
-python -m pytest tests -q
-```
+- `Aktarim.ps1` — Windows uygulaması (PowerShell 5.1; saat yanında simge, Edge/Chrome uygulama penceresi), `Aktarim.vbs` onu pencere açmadan başlatır.
+- `aktarim.py` — aynı API ile Python sürümü (macOS/Linux, yalnızca standart kitaplık).
+- `web/` — arayüz. `Kur.ps1` / `Kaldir.ps1` — kurulum ve kaldırma.
+- Testler: `python -m pytest tests -q`
+</details>
