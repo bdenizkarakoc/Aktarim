@@ -12,6 +12,7 @@ iPhone ve Samsung (Android) ile çalışır · telefona uygulama yüklemek gerek
 | **Gönder** | Fotoğraf, video, belge, klasör, yazı ya da bağlantıyı pencereye sürükle bırak; **“Gönderilsin mi?”** diye sorar, onaylayınca telefonda anında görünür. |
 | **Gelenler** | Telefondan gönderdiklerin bilgisayarda **Gelenler**'e düşer, saat yanında bildirim çıkar. Dosyalar `Masaüstü\Aktarım\Gelenler` klasörüne gerçek adlarıyla kaydedilir. |
 | **Gönderdiklerim** | Karşı tarafa gönderdiğin her şey. |
+| **Albümler** | Birden çok fotoğraf/video/dosyayı birlikte gönderince karşı tarafta tek **albüm** kartı olarak görünür (kolaj + adet); içine girip tek tek ya da hepsini birden kaydedebilirsin. Bilgisayarda da tek klasöre kaydedilir (ör. `Gelenler\iPhone 10.11.2026 16.55`); bir klasörü sürükleyince albümün adı klasörün adı olur. |
 | **Sonradan Sil** | Sildiğin öğe hemen gitmez: **1 hafta**, **2 hafta** ya da **1 ay** bekler, bu sürede **geri yükleyebilirsin**. Süre dolunca kendiliğinden silinir. |
 | **Telefon Bağla** | QR kodu telefonun kamerasıyla okut, bağlan. |
 

@@ -224,3 +224,18 @@ body.dragging .drop { display: grid; }
 .confirm-text { margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word; font: 14px/1.45 inherit; font-family: inherit; max-height: 220px; overflow: auto; }
 .modal-btns { display: flex; gap: 10px; margin-top: 14px; }
 .modal-btns .btn { margin: 0; }
+
+.album-thumb { padding: 0; }
+.collage { position: absolute; inset: 0; display: grid; gap: 2px; background: var(--card); }
+.collage.n1 { grid-template-columns: 1fr; }
+.collage.n2 { grid-template-columns: 1fr 1fr; }
+.collage.n3 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr 1fr; }
+.collage.n3 .cell:first-child { grid-row: span 2; }
+.collage.n4 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.collage .cell { position: relative; overflow: hidden; background: var(--fill); display: grid; place-items: center; }
+.collage .cell img, .collage .cell video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.collage .cell .ic-badge { width: 40px; height: 40px; font-size: 20px; }
+.album-thumb .count { position: absolute; left: 8px; bottom: 8px; display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,.55);
+  color: #fff; font-size: 13px; font-weight: 700; padding: 3px 9px; border-radius: 99px; backdrop-filter: blur(6px); }
+.item.album { box-shadow: var(--shadow), 6px 6px 0 -2px var(--card), 6px 6px 0 -1px var(--sep); margin: 0 6px 6px 0; }
+#album-back { margin-right: auto; }

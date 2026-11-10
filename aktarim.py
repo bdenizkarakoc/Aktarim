@@ -117,6 +117,7 @@ class Store:
         for d in (IN_DIR, OUT_DIR, BIN_DIR):
             (self.root / d).mkdir(parents=True, exist_ok=True)
         self.devices: dict[str, float] = {}
+        self.batches: dict[str, str] = {}      # toplu gönderim → klasör adı
         self.meta = self.root / "items.json"
         self.cfg_path = self.root / "ayarlar.json"
         self.lock = threading.RLock()
@@ -197,7 +198,28 @@ class Store:
 
     @staticmethod
     def home_dir(item: dict) -> str:
-        return OUT_DIR if item.get("source") == "Bilgisayar" else IN_DIR
+        base = OUT_DIR if item.get("source") == "Bilgisayar" else IN_DIR
+        return f"{base}/{item['batch_dir']}" if item.get("batch_dir") else base
+
+    def _batch_dir(self, base: str, batch: str, batch_name: str | None, source: str) -> tuple[str, str]:
+        """Toplu gönderimin klasörü: aynı gönderimin bütün dosyaları tek klasöre (ör. "iPhone 10.11.2026 16.55")."""
+        with self.lock:
+            if batch in self.batches:
+                return self.batches[batch]
+            for it in self.items:
+                if it.get("batch") == batch and it.get("batch_dir"):
+                    self.batches[batch] = (it["batch_dir"], it.get("batch_name") or it["batch_dir"])
+                    return self.batches[batch]
+            label = safe_name(batch_name or "")[:80] if batch_name else ""
+            if not label or label == "dosya":
+                label = f"{source} {time.strftime('%d.%m.%Y %H.%M')}"
+            folder, n = label, 1
+            while (self.root / base / folder).exists():
+                n += 1
+                folder = f"{label} ({n})"
+            (self.root / base / folder).mkdir(parents=True, exist_ok=True)
+            self.batches[batch] = (folder, label)
+            return self.batches[batch]
 
     def _new_item(self, **kw) -> dict:
         item = {"id": uuid.uuid4().hex[:12], "created": time.time(),
@@ -215,10 +237,18 @@ class Store:
 
     # ---- ekleme ----------------------------------------------------------
     def add_file_stream(self, name: str, stream, length: int, source: str,
-                        mime: str | None = None) -> dict:
+                        mime: str | None = None, batch: str | None = None,
+                        batch_name: str | None = None) -> dict:
         name = safe_name(name)
         fid = uuid.uuid4().hex[:12]
-        final = self._reserve(OUT_DIR if source == "Bilgisayar" else IN_DIR, name)
+        base = OUT_DIR if source == "Bilgisayar" else IN_DIR
+        extra: dict = {}
+        folder = base
+        if batch and re.fullmatch(r"[0-9a-f]{8,32}", batch):
+            bdir, label = self._batch_dir(base, batch, batch_name, source)
+            folder = f"{base}/{bdir}"
+            extra = {"batch": batch, "batch_name": label, "batch_dir": bdir}
+        final = self._reserve(folder, name)
         tmp = final.with_name(final.name + ".part")
         written = 0
         try:
@@ -239,7 +269,7 @@ class Store:
             raise
         mime = mime or mimetypes.guess_type(name)[0] or "application/octet-stream"
         item = self._new_item(id=fid, kind="file", name=final.name, file=self._rel(final),
-                              size=written, mime=mime, source=source)
+                              size=written, mime=mime, source=source, **extra)
         with self.lock:
             self.items.append(item)
             self._save()
@@ -540,9 +570,11 @@ class Handler(BaseHTTPRequestHandler):
                 mime = self.headers.get("Content-Type")
                 if mime in (None, "", "application/x-www-form-urlencoded"):
                     mime = None
+                bname = self.headers.get("X-Batch-Name")
                 item = self.store.add_file_stream(name, self.rfile, length,
                                                   self.headers.get("X-Source") or self.source,
-                                                  mime)
+                                                  mime, self.headers.get("X-Batch"),
+                                                  urllib.parse.unquote(bname) if bname else None)
                 return self._json(item, 201)
             data = self._body_json()
             if path == "/api/text":

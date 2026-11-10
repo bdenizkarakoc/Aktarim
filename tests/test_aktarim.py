@@ -177,3 +177,24 @@ def test_powershell_https_and_gallery():
     assert "https_urls" in text and "filename=`\"$asciiName`\"" in text
     app = (PS1.parent / "web" / "app.js").read_text("utf-8")
     assert "navigator.share({ files })" in app and "Galeri'ye" in app
+
+
+def test_batch_goes_to_one_folder(store):
+    a = store.add_file_stream("1.jpg", io.BytesIO(b"a"), 1, "iPhone", batch="abcdef0123", batch_name="Tatil")
+    b = store.add_file_stream("2.jpg", io.BytesIO(b"b"), 1, "iPhone", batch="abcdef0123", batch_name="Tatil")
+    assert store.path_of(a).parent == store.path_of(b).parent == store.root / "Gelenler" / "Tatil"
+    assert a["batch_name"] == "Tatil" and b["batch"] == "abcdef0123"
+    c = store.add_file_stream("3.jpg", io.BytesIO(b"c"), 1, "iPhone", batch="99887766aa", batch_name="Tatil")
+    assert store.path_of(c).parent.name == "Tatil (2)"
+    store.soft_delete(a["id"], 7)
+    store.restore(a["id"])
+    assert store.path_of(a).parent == store.root / "Gelenler" / "Tatil"
+    auto = store.add_file_stream("x.png", io.BytesIO(b"x"), 1, "Bilgisayar", batch="1234567890")
+    assert store.path_of(auto).parent.parent.name == "Gönderilenler" and auto["batch_name"].startswith("Bilgisayar ")
+
+
+def test_powershell_batch_support():
+    text = PS1.read_bytes().decode("utf-8-sig")
+    assert "function Get-BatchDir" in text and "$Req.Headers['x-batch']" in text and "batch_dir" in text
+    app = (PS1.parent / "web" / "app.js").read_text("utf-8")
+    assert 'setRequestHeader("X-Batch"' in app and "function albumCard" in app

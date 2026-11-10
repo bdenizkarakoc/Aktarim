@@ -92,6 +92,7 @@ const TABS = [
   { id: "bin", label: "Sonradan Sil", icon: "trash" },
   { id: "connect", label: "Telefon Bağla", icon: "qr", pc: true },
   { id: "setup", label: "Fotoğraflar'a kaydet", icon: "photo", hidden: true },
+  { id: "album", label: "Albüm", icon: "folder", hidden: true },
 ];
 const other = () => (isMobile ? "bilgisayar" : "telefon");
 const LEADS = {
@@ -101,6 +102,7 @@ const LEADS = {
   bin: () => "",
   connect: () => "Telefonunu bu bilgisayara bağla.",
   setup: () => "Bir kez kur; sonra fotoğraf ve videolar tek dokunuşla Fotoğraflar'a iner.",
+  album: () => "",
 };
 
 // ---------- yardımcılar ----------
@@ -183,12 +185,15 @@ function buildNav() {
   });
 }
 function setTab(tab) {
+  if (tab !== "album") state.albumFrom = tab;
   state.tab = tab;
   document.querySelectorAll(".page").forEach((p) => (p.hidden = p.dataset.page !== tab));
-  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+  const navTab = tab === "album" ? state.albumFrom : tab;
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === navTab));
   const t = TABS.find((x) => x.id === tab);
   $("#title").textContent = t.label;
   $("#lead").textContent = LEADS[tab]();
+  if (tab === "album") renderAlbum();
   if (tab === "connect") drawQR();
   if (tab === "inbox") setTimeout(markSeen, 1500);
   window.scrollTo(0, 0);
@@ -270,8 +275,8 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- göndermeden önce onay (sürükle-bırak, yapıştır) ----------
 let pending = null, previewUrls = [];
-function confirmSend(list, text) {
-  pending = { list: [...list], text };
+function confirmSend(list, text, batchName) {
+  pending = { list: [...list], text, batchName };
   drawConfirm();
   $("#confirm").hidden = false;
   $("#confirm-yes").focus();
@@ -299,7 +304,7 @@ function drawConfirm() {
   if (!list.length) return closeConfirm(true);
   const total = list.reduce((n, x) => n + (x.file.size || 0), 0);
   $("#confirm-title").textContent = list.length === 1 ? `${target} gönderilsin mi?` : `${list.length} öğe ${target.toLowerCase()} gönderilsin mi?`;
-  $("#confirm-sub").textContent = `Toplam ${size(total)} · istemediklerini ✕ ile çıkarabilirsin`;
+  $("#confirm-sub").textContent = `Toplam ${size(total)}${list.length > 1 ? ` · tek albüm${pending.batchName ? " (“" + pending.batchName + "”)" : ""} olarak gider` : ""} · istemediklerini ✕ ile çıkar`;
   list.forEach((x, i) => {
     const r = el("div", "row");
     const k = fileKind(x.file);
@@ -329,7 +334,7 @@ function acceptConfirm() {
   const p = pending;
   closeConfirm(false);
   if (!p) return;
-  if (p.text) sendText(p.text); else uploadAll(p.list);
+  if (p.text) sendText(p.text); else uploadAll(p.list, p.batchName);
 }
 $("#confirm-yes").addEventListener("click", acceptConfirm);
 $("#confirm-no").addEventListener("click", () => closeConfirm(true));
@@ -506,6 +511,128 @@ function card(it, isNew) {
   c.append(m, acts);
   return c;
 }
+// ---------- albümler (toplu gönderimler) ----------
+// Aynı anda gönderilen dosyalar (aynı "batch") tek bir albüm kartı olarak görünür.
+function grouped(list) {
+  const count = {};
+  list.forEach((i) => { if (i.batch) count[i.batch] = (count[i.batch] || 0) + 1; });
+  const out = [], done = new Set();
+  list.forEach((i) => {
+    if (i.batch && count[i.batch] > 1) {
+      if (done.has(i.batch)) return;
+      done.add(i.batch);
+      out.push({ album: i.batch, items: list.filter((x) => x.batch === i.batch) });
+    } else out.push({ item: i });
+  });
+  return out;
+}
+function albumItems(batch) {
+  return state.data ? state.data.items.filter((i) => i.batch === batch) : [];
+}
+function albumTitle(items) {
+  return items[0].batch_name || "Albüm";
+}
+function albumSummary(items) {
+  const n = items.length, ph = items.filter((i) => kind(i) === "photo").length, vd = items.filter((i) => kind(i) === "video").length;
+  const parts = [];
+  if (ph) parts.push(`${ph} fotoğraf`);
+  if (vd) parts.push(`${vd} video`);
+  if (n - ph - vd) parts.push(`${n - ph - vd} dosya`);
+  return parts.join(", ");
+}
+function openAlbum(batch) {
+  state.album = batch;
+  setTab("album");
+}
+function albumActions(items) {
+  const a = [["eye", "Aç", () => openAlbum(items[0].batch)]];
+  const media = items.filter(isMedia);
+  if (state.local) a.push(["folder", "Klasörde", () => reveal(items[0])]);
+  else if (isMobile && media.length) a.push(["save", isIOS ? "Hepsini kaydet" : "Galeriye", () => saveToPhotos(media)]);
+  else a.push(["save", "Hepsini indir", () => downloadAll(items)]);
+  a.push(["trash", "Sil", () => albumLaterMenu(items), true]);
+  return a;
+}
+async function downloadAll(items) {
+  for (const it of items.filter((i) => i.kind === "file")) { download(it); await sleep(500); }
+}
+function albumLaterMenu(items) {
+  const run = async (days) => {
+    for (const it of items) await api("/api/delete", { id: it.id, days });
+    toast(`${items.length} öğe Sonradan Sil'e taşındı · ${DAYS[days]} sonra silinecek`);
+    if (state.tab === "album") setTab(state.albumFrom || "inbox");
+    refresh(true);
+  };
+  const purgeAll = async () => {
+    if (!confirm(`“${albumTitle(items)}” içindeki ${items.length} öğe kalıcı olarak silinsin mi? Bu geri alınamaz.`)) return;
+    for (const it of items) await api("/api/purge", { id: it.id });
+    toast("Kalıcı olarak silindi");
+    if (state.tab === "album") setTab(state.albumFrom || "inbox");
+    refresh(true);
+  };
+  sheet(`“${albumTitle(items)}” (${items.length} öğe) ne zaman silinsin? Bu süre içinde Sonradan Sil'den geri yükleyebilirsin.`, [
+    ["1 hafta sonra sil", () => run(7)], ["2 hafta sonra sil", () => run(14)], ["1 ay sonra sil", () => run(30)],
+    ["Hemen kalıcı olarak sil", purgeAll, true],
+  ]);
+}
+function collage(items) {
+  const t = el("button", "thumb album-thumb");
+  const pics = [...items.filter((i) => canShow(i) || kind(i) === "video"), ...items.filter((i) => !(canShow(i) || kind(i) === "video"))].slice(0, 4);
+  const grid = el("div", "collage n" + pics.length);
+  pics.forEach((it) => {
+    const cell = el("span", "cell");
+    if (canShow(it)) { const img = el("img"); img.loading = "lazy"; img.src = fileUrl(it); img.alt = ""; cell.append(img); }
+    else if (kind(it) === "video") {
+      const v = el("video"); v.src = fileUrl(it) + "#t=0.5"; v.muted = true; v.playsInline = true; v.preload = "metadata"; cell.append(v);
+    } else { const b = el("span", "ic-badge " + (COLOR[kind(it)] || "")); b.append(icon(ICON_OF[kind(it)] || "file")); cell.append(b); }
+    grid.append(cell);
+  });
+  const badge = el("span", "count"); badge.append(icon("folder"), el("span", "", String(items.length)));
+  t.append(grid, badge);
+  t.addEventListener("click", () => openAlbum(items[0].batch));
+  return t;
+}
+function albumCard(items, isNew) {
+  const c = el("div", "item album");
+  if (isNew) c.append(el("span", "new", "Yeni"));
+  c.append(collage(items));
+  const total = items.reduce((n, i) => n + (i.size || 0), 0);
+  const latest = Math.max(...items.map((i) => i.created));
+  const m = el("div", "meta");
+  m.append(el("b", "", albumTitle(items)), el("small", "", `${albumSummary(items)} · ${size(total)}`),
+    el("small", "", `${items[0].source || ""} · ${when(latest)}`));
+  const acts = el("div", "acts");
+  albumActions(items).forEach(([ic, label, fn, red]) => {
+    const b = el("button", red ? "red" : ""); b.append(icon(ic), el("span", "", label)); b.title = label;
+    b.addEventListener("click", fn); acts.append(b);
+  });
+  c.append(m, acts);
+  return c;
+}
+function cardsFor(list, markNew) {
+  return grouped(list).map((g) => g.album
+    ? albumCard(g.items, markNew && g.items.some((i) => !seen.has(i.id)))
+    : card(g.item, markNew && !seen.has(g.item.id)));
+}
+function renderAlbum() {
+  if (state.tab !== "album") return;
+  const items = albumItems(state.album);
+  if (!items.length) { setTab(state.albumFrom || "inbox"); return; }
+  $("#title").textContent = albumTitle(items);
+  const total = items.reduce((n, i) => n + (i.size || 0), 0);
+  $("#lead").textContent = `${albumSummary(items)} · ${size(total)} · ${items[0].source || ""} · ${when(Math.max(...items.map((i) => i.created)))}`;
+  const tools = $("#album-tools");
+  tools.replaceChildren();
+  albumActions(items).slice(1).forEach(([ic, label, fn, red]) => {
+    const b = el("button", "btn small " + (red ? "danger" : "soft")); b.append(icon(ic), el("span", "", label));
+    b.addEventListener("click", fn); tools.append(b);
+  });
+  const fromOther = !mine(items[0]);
+  const ordered = [...items].sort((a, b) => a.created - b.created);
+  $("#album-cards").replaceChildren(...ordered.map((i) => card(i, fromOther && !seen.has(i.id))));
+  if (fromOther) setTimeout(() => { items.forEach((i) => seen.add(i.id)); store.set("seen", [...seen].slice(-2000)); }, 1500);
+}
+
 function binRow(it) {
   const r = el("div", "row");
   const ic = el("span", "ic-badge " + (COLOR[kind(it)] || ""));
@@ -515,6 +642,7 @@ function binRow(it) {
   const soon = it.expires_at - Date.now() / 1000 < 2 * 86400;
   const sub = el("div", "sub" + (soon ? " soon" : ""));
   sub.append(icon("clock"), el("span", "", `${left(it.expires_at)}${it.kind === "file" ? " · " + size(it.size) : ""}`));
+  if (it.batch_name) sub.append(el("span", "", "· " + it.batch_name));
   main.append(el("div", "name", it.kind === "text" ? it.text.replace(/\s+/g, " ").slice(0, 80) : it.name), sub);
   const back = el("button", "btn soft", "Geri yükle");
   back.addEventListener("click", () => restore(it));
@@ -557,14 +685,15 @@ function render() {
   const outgoing = d.items.filter(mine);
   const fi = incoming.filter((i) => matches(i, state.filters.inbox));
   const fo = outgoing.filter((i) => matches(i, state.filters.sent));
-  $("#inbox").replaceChildren(...fi.map((i) => card(i, !seen.has(i.id))));
+  $("#inbox").replaceChildren(...cardsFor(fi, true));
   const media = fi.filter(isMedia);
   const all = $("#save-all");
   if (all) { all.hidden = media.length < 2; all.lastChild.textContent = `Hepsini ${isIOS ? "Fotoğraflar'a" : "Galeri'ye"} kaydet (${media.length})`; }
   $("#photos-banner").hidden = !(isIOS && !canShareFiles() && info && info.ca && incoming.some(isMedia));
   prefetchMedia();
   $("#inbox-empty").hidden = fi.length > 0;
-  $("#sent").replaceChildren(...fo.map((i) => card(i, false)));
+  $("#sent").replaceChildren(...cardsFor(fo, false));
+  renderAlbum();
   $("#sent-empty").hidden = fo.length > 0;
   setBadge("inbox", incoming.filter((i) => !seen.has(i.id)).length);
   $("#bin").replaceChildren(...d.bin.map(binRow));
@@ -628,7 +757,10 @@ function buildPicks() {
   });
   ["in-photo", "in-video", "in-doc", "in-any", "in-cam", "in-folder"].forEach((id) => {
     $("#" + id).addEventListener("change", (e) => {
-      uploadAll([...e.target.files].map((f) => ({ file: f, name: (f.webkitRelativePath || f.name).replace(/\//g, " - ") })));
+      const files = [...e.target.files];
+      const rel = files[0] && files[0].webkitRelativePath;
+      const folder = rel ? rel.split("/")[0] : null;
+      uploadAll(files.map((f) => ({ file: f, name: (f.webkitRelativePath ? f.webkitRelativePath.split("/").slice(1).join(" - ") : f.name) })), folder);
       e.target.value = "";
     });
   });
@@ -648,6 +780,60 @@ async function pasteFromClipboard() {
   } catch {
     toast("Ctrl+V ile de yapıştırabilirsin");
   }
+}
+function newBatchId() {
+  const a = new Uint8Array(6);
+  crypto.getRandomValues(a);
+  return [...a].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+function sendOne(file, name, batch, batchName, onProgress) {
+  return new Promise((resolve) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", "/api/upload");
+    x.setRequestHeader("X-Filename", encodeURIComponent(name));
+    x.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+    if (batch) x.setRequestHeader("X-Batch", batch);
+    if (batchName) x.setRequestHeader("X-Batch-Name", encodeURIComponent(batchName));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded); };
+    x.onload = () => {
+      let j = {}; try { j = JSON.parse(x.responseText || "{}"); } catch { /* boş */ }
+      if (x.status === 201) { state.known.add(j.id); resolve({ ok: true, item: j }); }
+      else resolve({ ok: false, error: j.error || String(x.status) });
+    };
+    x.onerror = () => resolve({ ok: false, error: "Bağlantı koptu" });
+    x.send(file);
+  });
+}
+// Birden çok dosya: tek albüm (karşı tarafta tek kart, bilgisayarda tek klasör) ve tek ilerleme satırı.
+async function uploadBatch(files, batchName) {
+  const batch = newBatchId();
+  const total = files.reduce((n, f) => n + (f.file.size || 0), 0);
+  const r = el("div", "up");
+  const ic = el("span", "ic-badge orange"); ic.append(icon("folder"));
+  const main = el("div", "main-t");
+  const bar = el("div", "bar"), fill = el("i"); bar.append(fill);
+  const title = el("div", "name", `${batchName ? "“" + batchName + "” · " : ""}${files.length} öğe albüm olarak`);
+  const sub = el("div", "sub", "Bekliyor · " + size(total));
+  main.append(title, sub, bar);
+  r.append(ic, main);
+  $("#uploads").prepend(r);
+  let done = 0, ok = 0, failed = 0, label = null;
+  for (let i = 0; i < files.length; i++) {
+    const f = files[i];
+    const res = await sendOne(f.file, f.name || f.file.name || "dosya", batch, batchName, (loaded) => {
+      const p = total ? Math.round(((done + loaded) / total) * 100) : 0;
+      fill.style.width = p + "%";
+      sub.textContent = `${i + 1}/${files.length} · %${p} · ${size(done + loaded)} / ${size(total)}`;
+    });
+    done += f.file.size || 0;
+    if (res.ok) { ok++; label = label || res.item.batch_name; } else failed++;
+  }
+  fill.style.width = "100%";
+  if (label) title.textContent = `“${label}” · ${files.length} öğe`;
+  sub.textContent = failed ? `${ok} gönderildi, ${failed} gönderilemedi` : "Hepsi tek albüm olarak gönderildi";
+  if (!failed) { ic.replaceChildren(icon("check")); ic.classList.replace("orange", "green"); } else fill.style.background = "var(--red)";
+  setTimeout(() => r.remove(), failed ? 20000 : 6000);
+  return ok;
 }
 function upload(file, name) {
   name = name || file.name || "dosya";
@@ -684,13 +870,15 @@ function upload(file, name) {
     x.send(file);
   });
 }
-async function uploadAll(list) {
+async function uploadAll(list, batchName) {
   const files = list.filter(Boolean);
   if (!files.length) return;
   if (state.tab !== "send") setTab("send");
   let ok = 0;
-  for (const f of files) ok += (await upload(f.file, f.name)) ? 1 : 0;
-  toast(ok === files.length ? `${ok} öğe gönderildi` : `${ok}/${files.length} öğe gönderildi`);
+  if (files.length > 1) ok = await uploadBatch(files, batchName);
+  else ok = (await upload(files[0].file, files[0].name)) ? 1 : 0;
+  const how = files.length > 1 ? " tek albüm olarak" : "";
+  toast(ok === files.length ? `${ok} öğe${how} gönderildi` : `${ok}/${files.length} öğe gönderildi`);
   refresh(true);
 }
 async function sendText(text) {
@@ -728,8 +916,13 @@ window.addEventListener("drop", async (e) => {
     }, res);
     next();
   });
-  for (const en of entries) await walk(en, "");
-  if (out.length) confirmSend(out);
+  const single = entries.length === 1 && entries[0].isDirectory;
+  if (single) {
+    const reader = entries[0].createReader();
+    const kids = await new Promise((res) => { const all = []; const next = () => reader.readEntries((b) => { if (!b.length) return res(all); all.push(...b); next(); }, () => res(all)); next(); });
+    for (const k of kids) await walk(k, "");
+  } else for (const en of entries) await walk(en, "");
+  if (out.length) confirmSend(out, undefined, single ? entries[0].name : undefined);
 });
 window.addEventListener("paste", (e) => {
   const files = [...(e.clipboardData?.files || [])].map((f, i) => ({ file: f, name: f.name === "image.png" ? `Yapıştırılan ${Date.now()}-${i}.png` : f.name }));
@@ -739,6 +932,7 @@ window.addEventListener("paste", (e) => {
   if (text && text.trim()) confirmSend([], text.trim());
 });
 
+$("#album-back").addEventListener("click", () => setTab(state.albumFrom || "inbox"));
 $("#empty-bin").addEventListener("click", async () => {
   if (!confirm("Sonradan Sil kutusundaki her şey kalıcı olarak silinsin mi?")) return;
   const r = await api("/api/empty-bin", {});

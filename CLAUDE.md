@@ -12,6 +12,8 @@ Bilgisayar ↔ telefon (iPhone/Samsung) dosya, fotoğraf, video, belge ve yazı 
   kısayolu, Gönder menüsü, güvenlik duvarı, Uygulamalar kaydı; `Kaldir.ps1` geri alır. İkisi de ASCII kalmalı;
   `Kur.ps1`'deki `$files` listesine yeni dosyaları ekle.
 - Dosyalar gerçek adlarıyla `Gelenler/`, `Gönderilenler/`, `Sonradan Sil/` klasörlerinde; `item.file` köke göreli.
+- Toplu gönderim = albüm: istemci `X-Batch` (hex) + isteğe bağlı `X-Batch-Name` yollar; sunucu aynı batch'i tek klasöre
+  (`Gelenler/<ad>/`) koyar, öğede `batch`, `batch_name`, `batch_dir`; geri yükleme albüm klasörüne döner.
 - "Sonradan Sil": 7 / 14 / 30 gün, geri yüklenebilir, süre dolunca kalıcı silinir.
 - `/api/reveal`, `/api/open-folder` yalnızca 127.0.0.1'den.
 - Aynı kapıda http + https (ilk bayt 0x16 → TLS). Yerel CA (`/aktarim-ca.cer`, PS: `Cert:\CurrentUser\My`, Python:

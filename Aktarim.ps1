@@ -105,6 +105,7 @@ function New-Shared([string]$Root) {
   $S.Meta = Join-Path $Root 'items.json'; $S.CfgPath = Join-Path $Root 'ayarlar.json'
   $S.Items = New-Object System.Collections.ArrayList
   $S.Devices = [hashtable]::Synchronized(@{})
+  $S.Batches = [hashtable]::Synchronized(@{})
   $bytes = New-Object byte[] 9
   [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
   $token = [Convert]::ToBase64String($bytes).Replace('+', '-').Replace('/', '_').TrimEnd('=')
@@ -138,7 +139,7 @@ function Get-Rel($S, [string]$Full) {
 # Klasörde boş bir ad bulur ("foto (2).jpg") ve .part yer tutucusuyla ayırır.
 function Get-UniquePath($S, [string]$Folder, [string]$Name) {
   $base = [IO.Path]::GetFileNameWithoutExtension($Name); $ext = [IO.Path]::GetExtension($Name)
-  $dir = Join-Path $S.Root $Folder
+  $dir = Join-Path $S.Root ($Folder.Replace('/', '\'))
   [void][IO.Directory]::CreateDirectory($dir)
   Lock-Do $S {
     $n = 1
@@ -163,7 +164,34 @@ function Move-ItemFile($S, $Item, [string]$Folder) {
   $Item.file = Get-Rel $S $dst
 }
 
-function Get-HomeDir($Item) { if ($Item.source -eq 'Bilgisayar') { return $OutDir } $InDir }
+function Get-HomeDir($Item) {
+  $base = $InDir; if ($Item.source -eq 'Bilgisayar') { $base = $OutDir }
+  if ($Item.batch_dir) { return "$base/$($Item.batch_dir)" }
+  $base
+}
+
+# Toplu gönderimin klasörü: aynı gönderimin bütün dosyaları tek klasöre (ör. "iPhone 10.11.2026 16.55").
+function Get-BatchDir($S, [string]$Base, [string]$Batch, [string]$BatchName, [string]$Source) {
+  Lock-Do $S {
+    if ($S.Batches.ContainsKey($Batch)) { return ,$S.Batches[$Batch] }
+    foreach ($i in $S.Items) {
+      if ($i.batch -eq $Batch -and $i.batch_dir) {
+        $pair = @([string]$i.batch_dir, [string]$i.batch_name)
+        $S.Batches[$Batch] = $pair
+        return ,$pair
+      }
+    }
+    $label = ''
+    if ($BatchName) { $label = Get-SafeName $BatchName; if ($label.Length -gt 80) { $label = $label.Substring(0, 80) } }
+    if (-not $label -or $label -eq 'dosya') { $label = "$Source " + (Get-Date).ToString('dd.MM.yyyy HH.mm') }
+    $folder = $label; $n = 1
+    while (Test-Path -LiteralPath (Join-Path (Join-Path $S.Root $Base) $folder)) { $n++; $folder = "$label ($n)" }
+    [void][IO.Directory]::CreateDirectory((Join-Path (Join-Path $S.Root $Base) $folder))
+    $pair = @($folder, $label)
+    $S.Batches[$Batch] = $pair
+    return ,$pair
+  }
+}
 
 function Find-Item($S, [string]$Id) {
   foreach ($i in $S.Items) { if ($i.id -eq $Id) { return $i } }
@@ -188,10 +216,17 @@ function Remove-Expired($S) {
   }
 }
 
-function Add-FileFromStream($S, [string]$Name, $Stream, [long]$Length, [string]$Source, [string]$Mime) {
+function Add-FileFromStream($S, [string]$Name, $Stream, [long]$Length, [string]$Source, [string]$Mime, [string]$Batch, [string]$BatchName) {
   $Name = Get-SafeName $Name
   $id = New-Id
-  $folder = $InDir; if ($Source -eq 'Bilgisayar') { $folder = $OutDir }
+  $base = $InDir; if ($Source -eq 'Bilgisayar') { $base = $OutDir }
+  $folder = $base
+  $bdir = $null; $blabel = $null
+  if ($Batch -and $Batch -match '^[0-9a-f]{8,32}$') {
+    $pair = Get-BatchDir $S $base $Batch $BatchName $Source
+    $bdir = [string]$pair[0]; $blabel = [string]$pair[1]
+    $folder = "$base/$bdir"
+  }
   $final = Get-UniquePath $S $folder $Name
   $tmp = "$final.part"
   $written = [long]0
@@ -211,6 +246,7 @@ function Add-FileFromStream($S, [string]$Name, $Stream, [long]$Length, [string]$
   if (-not $Mime -or $Mime -eq 'application/x-www-form-urlencoded' -or $Mime -eq 'application/octet-stream') { $Mime = Get-Mime $Name }
   $item = @{ id = $id; created = (Now-Unix); deleted_at = $null; expires_at = $null; kind = 'file';
              name = [IO.Path]::GetFileName($final); file = (Get-Rel $S $final); size = $written; mime = $Mime; source = $Source }
+  if ($bdir) { $item.batch = $Batch; $item.batch_dir = $bdir; $item.batch_name = $blabel }
   Lock-Do $S { [void]$S.Items.Add($item); Save-Items $S }
   $item
 }
@@ -465,7 +501,8 @@ function Invoke-Route($S, $Req, $In, $Out) {
       $name = 'dosya'
       if ($Req.Headers['x-filename']) { $name = [Uri]::UnescapeDataString($Req.Headers['x-filename']) }
       $from = $src; if ($Req.Headers['x-source']) { $from = $Req.Headers['x-source'] }
-      $item = Add-FileFromStream $S $name $In ([long]$Req.Headers['content-length']) $from $Req.Headers['content-type']
+      $bname = $null; if ($Req.Headers['x-batch-name']) { $bname = [Uri]::UnescapeDataString($Req.Headers['x-batch-name']) }
+      $item = Add-FileFromStream $S $name $In ([long]$Req.Headers['content-length']) $from $Req.Headers['content-type'] $Req.Headers['x-batch'] $bname
       return Send-Json $Out $item 201
     }
     $data = Read-JsonBody $In $Req
