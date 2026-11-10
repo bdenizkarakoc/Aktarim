@@ -9,7 +9,7 @@ iPhone ve Samsung (Android) ile çalışır · telefona uygulama yüklemek gerek
 
 | | |
 |---|---|
-| **Gönder** | Fotoğraf, video, belge, klasör, yazı ya da bağlantıyı pencereye sürükle bırak; telefonda anında görünür. |
+| **Gönder** | Fotoğraf, video, belge, klasör, yazı ya da bağlantıyı pencereye sürükle bırak; **“Gönderilsin mi?”** diye sorar, onaylayınca telefonda anında görünür. |
 | **Gelenler** | Telefondan gönderdiklerin bilgisayarda **Gelenler**'e düşer, saat yanında bildirim çıkar. Dosyalar `Masaüstü\Aktarım\Gelenler` klasörüne gerçek adlarıyla kaydedilir. |
 | **Gönderdiklerim** | Karşı tarafa gönderdiğin her şey. |
 | **Sonradan Sil** | Sildiğin öğe hemen gitmez: **1 hafta**, **2 hafta** ya da **1 ay** bekler, bu sürede **geri yükleyebilirsin**. Süre dolunca kendiliğinden silinir. |
@@ -64,7 +64,7 @@ Güncellemek için aynı satırı yeniden çalıştırman yeterli.
   **Galeri → İndirilenler** albümüne iner.
 - **iPhone:** Gelenler'de **Kaydet** → **Görüntüyü Kaydet / Videoyu Kaydet**: doğrudan **Fotoğraflar**'a (Film Rulosu) iner;
   *Hepsini Fotoğraflar'a kaydet* ile hepsi birden. iPhone bunu yalnızca güvenli bağlantıda yaptığı için ilk seferde
-  Aktarım 1 dakikalık bir kurulum gösterir: sertifikayı indir → Ayarlar'da **Profil İndirildi → Yükle** →
+  Aktarım 1 dakikalık bir kurulum gösterir: sertifikayı indir (çıkan *“Profil İndirildi”* yazısı hata değildir, Kapat'a dokun) → Ayarlar'da **Profil İndirildi → Yükle** →
   **Genel → Hakkında → Sertifika Güven Ayarları → Aktarim Yerel CA**'yı aç. Sonra Aktarım kendiliğinden güvenli
   bağlantıya geçer. (Sertifika bu bilgisayarda üretilir, yalnızca Aktarım için ve yalnızca evdeki ağda kullanılır.)
 

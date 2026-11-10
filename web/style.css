@@ -207,3 +207,20 @@ body.dragging .drop { display: grid; }
 .step a.btn { text-decoration: none; }
 .step .btn { margin-top: 10px; }
 .note-small { color: var(--muted); font-size: 13px; line-height: 1.45; margin: 4px; }
+
+.viewer-actions { display: flex; gap: 8px; }
+.vbtn { display: inline-flex; align-items: center; gap: 6px; color: #fff; background: rgba(255,255,255,.16); padding: 7px 12px; border-radius: 99px; font-size: 14px; font-weight: 600; }
+.vbtn svg { font-size: 17px; }
+.vbtn:hover { background: rgba(255,255,255,.26); }
+@media (max-width: 520px) { .vbtn { padding: 8px 12px; font-size: 15px; } .vbtn svg { font-size: 19px; } .viewer-bar span#viewer-name { font-size: 13px; } }
+.modal-back { position: fixed; inset: 0; z-index: 45; background: rgba(0,0,0,.38); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { width: 100%; max-width: 480px; max-height: 86vh; display: flex; flex-direction: column; background: var(--card); border-radius: 18px; box-shadow: 0 20px 60px rgba(0,0,0,.3); padding: 18px; animation: up .2s ease-out; }
+.modal-head { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+.modal-head b { display: block; font-size: 18px; }
+.modal-head small { color: var(--muted); font-size: 13px; }
+.confirm-list { overflow: auto; background: var(--bg); border-radius: 12px; min-height: 0; }
+.confirm-list .row { padding: 8px 12px; }
+.confirm-list .row .ic-badge { width: 40px; height: 40px; }
+.confirm-text { margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word; font: 14px/1.45 inherit; font-family: inherit; max-height: 220px; overflow: auto; }
+.modal-btns { display: flex; gap: 10px; margin-top: 14px; }
+.modal-btns .btn { margin: 0; }

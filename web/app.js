@@ -239,25 +239,112 @@ function sheet(title, actions) {
 }
 $("#sheet-cancel").addEventListener("click", () => ($("#sheet-back").hidden = true));
 $("#sheet-back").addEventListener("click", (e) => { if (e.target.id === "sheet-back") e.currentTarget.hidden = true; });
-function viewer(name, node) {
+function viewer(name, node, it) {
   $("#viewer-name").textContent = name;
   $("#viewer-body").replaceChildren(node);
+  const acts = $("#viewer-actions");
+  acts.replaceChildren();
+  const add = (ic, label, fn) => {
+    const b = el("button", "vbtn"); b.append(icon(ic), el("span", "", label)); b.title = label;
+    b.addEventListener("click", fn); acts.append(b);
+  };
+  if (it && it.kind === "text") add("copy", "Kopyala", () => copyText(it.text));
+  else if (it) {
+    if (isMobile && isMedia(it)) add("save", isIOS ? "Kaydet" : "Galeriye", () => saveToPhotos(it));
+    else add("save", "İndir", () => download(it));
+    if (state.local) add("folder", "Klasörde göster", () => reveal(it));
+    if (isIOS && isMedia(it) && canShareFiles()) getFile(it).catch(() => null);
+  }
   $("#viewer").hidden = false;
 }
 function closeViewer() { $("#viewer").hidden = true; $("#viewer-body").replaceChildren(); }
 $("#viewer-close").addEventListener("click", closeViewer);
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeViewer(); $("#sheet-back").hidden = true; } });
+document.addEventListener("keydown", (e) => {
+  if (!$("#confirm").hidden) {
+    if (e.key === "Escape") { e.preventDefault(); closeConfirm(true); }
+    else if (e.key === "Enter" && !e.target.closest("textarea")) { e.preventDefault(); acceptConfirm(); }
+    return;
+  }
+  if (e.key === "Escape") { closeViewer(); $("#sheet-back").hidden = true; }
+});
+
+// ---------- göndermeden önce onay (sürükle-bırak, yapıştır) ----------
+let pending = null, previewUrls = [];
+function confirmSend(list, text) {
+  pending = { list: [...list], text };
+  drawConfirm();
+  $("#confirm").hidden = false;
+  $("#confirm-yes").focus();
+}
+function fileKind(f) {
+  const t = f.type || "";
+  if (t.startsWith("image/")) return "photo";
+  if (t.startsWith("video/")) return "video";
+  if (t.startsWith("audio/")) return "audio";
+  if (/zip|rar|7z|tar|gzip/.test(t)) return "zip";
+  return "doc";
+}
+function drawConfirm() {
+  previewUrls.forEach((u) => URL.revokeObjectURL(u)); previewUrls = [];
+  const box = $("#confirm-list");
+  box.replaceChildren();
+  const target = isMobile ? "Bilgisayara" : "Telefona";
+  if (pending.text) {
+    $("#confirm-title").textContent = `Bu yazı ${target.toLowerCase()} gönderilsin mi?`;
+    $("#confirm-sub").textContent = `${pending.text.length} karakter`;
+    box.append(el("pre", "confirm-text", pending.text.slice(0, 600)));
+    return;
+  }
+  const list = pending.list;
+  if (!list.length) return closeConfirm(true);
+  const total = list.reduce((n, x) => n + (x.file.size || 0), 0);
+  $("#confirm-title").textContent = list.length === 1 ? `${target} gönderilsin mi?` : `${list.length} öğe ${target.toLowerCase()} gönderilsin mi?`;
+  $("#confirm-sub").textContent = `Toplam ${size(total)} · istemediklerini ✕ ile çıkarabilirsin`;
+  list.forEach((x, i) => {
+    const r = el("div", "row");
+    const k = fileKind(x.file);
+    const ic = el("span", "ic-badge " + (COLOR[k] || ""));
+    if (k === "photo" && i < 60 && !/heic|heif/i.test(x.file.type)) {
+      const u = URL.createObjectURL(x.file); previewUrls.push(u);
+      const img = el("img"); img.src = u; img.alt = ""; ic.append(img);
+    } else ic.append(icon(ICON_OF[k] || "file"));
+    const main = el("div", "main-t");
+    main.append(el("div", "name", x.name || x.file.name || "dosya"), el("div", "sub", size(x.file.size || 0)));
+    r.append(ic, main);
+    if (list.length > 1) {
+      const rm = el("button", "more", "✕"); rm.title = "Çıkar";
+      rm.addEventListener("click", () => { pending.list.splice(i, 1); drawConfirm(); });
+      r.append(rm);
+    }
+    box.append(r);
+  });
+}
+function closeConfirm(cancelled) {
+  previewUrls.forEach((u) => URL.revokeObjectURL(u)); previewUrls = [];
+  $("#confirm").hidden = true;
+  if (cancelled && pending) toast("Gönderilmedi");
+  pending = null;
+}
+function acceptConfirm() {
+  const p = pending;
+  closeConfirm(false);
+  if (!p) return;
+  if (p.text) sendText(p.text); else uploadAll(p.list);
+}
+$("#confirm-yes").addEventListener("click", acceptConfirm);
+$("#confirm-no").addEventListener("click", () => closeConfirm(true));
+$("#confirm").addEventListener("click", (e) => { if (e.target.id === "confirm") closeConfirm(true); });
 
 function openItem(it) {
   const k = kind(it);
-  if (k === "text") return viewer("Yazı", el("pre", "", it.text));
-  if (canShow(it)) { const img = el("img"); img.src = fileUrl(it); img.alt = it.name; return viewer(it.name, img); }
+  if (k === "text") return viewer("Yazı", el("pre", "", it.text), it);
+  if (canShow(it)) { const img = el("img"); img.src = fileUrl(it); img.alt = it.name; return viewer(it.name, img, it); }
   if (k === "video") {
     const v = el("video"); v.src = fileUrl(it); v.controls = true; v.playsInline = true; v.autoplay = true;
-    return viewer(it.name, v);
+    return viewer(it.name, v, it);
   }
-  if (k === "audio") { const a = el("audio"); a.src = fileUrl(it); a.controls = true; a.autoplay = true; return viewer(it.name, a); }
-  if (/pdf|text\/plain/.test(it.mime || "")) { const f = el("iframe"); f.src = fileUrl(it); return viewer(it.name, f); }
+  if (k === "audio") { const a = el("audio"); a.src = fileUrl(it); a.controls = true; a.autoplay = true; return viewer(it.name, a, it); }
+  if (/pdf|text\/plain/.test(it.mime || "")) { const f = el("iframe"); f.src = fileUrl(it); return viewer(it.name, f, it); }
   if (state.local) return reveal(it);
   window.open(fileUrl(it), "_blank");
 }
@@ -554,9 +641,9 @@ async function pasteFromClipboard() {
       const img = ci.types.find((t) => t.startsWith("image/"));
       if (img) { const b = await ci.getType(img); files.push({ file: b, name: `Panodan ${new Date().toLocaleString("tr-TR").replace(/[/:]/g, ".")}.png` }); }
     }
-    if (files.length) return uploadAll(files);
+    if (files.length) return confirmSend(files);
     const text = await navigator.clipboard.readText();
-    if (text.trim()) return sendText(text);
+    if (text.trim()) return confirmSend([], text.trim());
     toast("Panoda gönderilecek bir şey yok");
   } catch {
     toast("Ctrl+V ile de yapıştırabilirsin");
@@ -630,7 +717,7 @@ window.addEventListener("drop", async (e) => {
   dragDepth = 0;
   document.body.classList.remove("dragging");
   const entries = [...e.dataTransfer.items].map((i) => i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
-  if (!entries.length) return uploadAll([...e.dataTransfer.files].map((f) => ({ file: f, name: f.name })));
+  if (!entries.length) return confirmSend([...e.dataTransfer.files].map((f) => ({ file: f, name: f.name })));
   const out = [];
   const walk = (entry, prefix) => new Promise((res) => {
     if (entry.isFile) return entry.file((f) => { out.push({ file: f, name: prefix + f.name }); res(); }, res);
@@ -642,14 +729,14 @@ window.addEventListener("drop", async (e) => {
     next();
   });
   for (const en of entries) await walk(en, "");
-  uploadAll(out);
+  if (out.length) confirmSend(out);
 });
 window.addEventListener("paste", (e) => {
   const files = [...(e.clipboardData?.files || [])].map((f, i) => ({ file: f, name: f.name === "image.png" ? `Yapıştırılan ${Date.now()}-${i}.png` : f.name }));
-  if (files.length) { e.preventDefault(); return uploadAll(files); }
+  if (files.length) { e.preventDefault(); return confirmSend(files); }
   if (e.target.closest && e.target.closest("textarea, input")) return;
   const text = e.clipboardData?.getData("text");
-  if (text && text.trim()) sendText(text);
+  if (text && text.trim()) confirmSend([], text.trim());
 });
 
 $("#empty-bin").addEventListener("click", async () => {

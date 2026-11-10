@@ -99,9 +99,9 @@
     <!-- iPHONE: FOTOĞRAFLAR'A KAYDETME KURULUMU -->
     <section class="page" data-page="setup" hidden>
       <div class="steps">
-        <div class="step"><span>1</span><div><b>Sertifikayı indir</b>Aşağıdaki düğmeye dokun, çıkan soruda <b>İzin Ver</b>, sonra <b>Kapat</b>.
+        <div class="step"><span>1</span><div><b>Sertifikayı indir</b>Aşağıdaki düğmeye dokun, çıkan soruda <b>İzin Ver</b>. Ardından <b>“Profil İndirildi”</b> yazısı çıkar: bu bir hata değil, <b>Kapat</b>'a dokun ve 2. adıma geç.
           <a class="btn primary" id="setup-ca" href="/aktarim-ca.cer">Sertifikayı indir</a></div></div>
-        <div class="step"><span>2</span><div><b>Profili yükle</b><b>Ayarlar</b>'ı aç → en üstte <b>Profil İndirildi</b> → <b>Yükle</b> (iPhone şifren) → <b>Yükle</b> → <b>Bitti</b>.</div></div>
+        <div class="step"><span>2</span><div><b>Profili yükle</b>Telefonun <b>Ayarlar</b> uygulamasını aç → en üstte <b>Profil İndirildi</b> → <b>Yükle</b> (iPhone şifren) → <b>Yükle</b> → <b>Bitti</b>.</div></div>
         <div class="step"><span>3</span><div><b>Sertifikaya güven</b><b>Ayarlar → Genel → Hakkında</b> → en altta <b>Sertifika Güven Ayarları</b> → <b>Aktarim Yerel CA</b>'yı aç → <b>Devam</b>.</div></div>
         <div class="step"><span>4</span><div><b>Güvenli bağlantıya geç</b>Aktarım güvenli bağlantıyla yeniden açılır. Ana ekrana eklediysen eski simgeyi silip bu sayfadan yeniden <b>Ana Ekrana Ekle</b>.
           <button class="btn primary" id="setup-go">Güvenli bağlantıya geç</button></div></div>
@@ -141,8 +141,17 @@
 </div>
 
 <div class="viewer" id="viewer" hidden>
-  <div class="viewer-bar"><span id="viewer-name"></span><button id="viewer-close">Bitti</button></div>
+  <div class="viewer-bar"><span id="viewer-name"></span><span class="viewer-actions" id="viewer-actions"></span><button id="viewer-close">Bitti</button></div>
   <div class="viewer-body" id="viewer-body"></div>
+</div>
+
+<div class="modal-back" id="confirm" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+    <div class="modal-head"><span class="ic-badge" data-icon="upload"></span>
+      <div><b id="confirm-title"></b><small id="confirm-sub"></small></div></div>
+    <div class="confirm-list" id="confirm-list"></div>
+    <div class="modal-btns"><button class="btn soft" id="confirm-no">Vazgeç</button><button class="btn primary" id="confirm-yes">Gönder</button></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
