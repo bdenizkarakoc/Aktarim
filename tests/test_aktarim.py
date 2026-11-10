@@ -107,3 +107,18 @@ def test_powershell_script_encoding_and_routes():
     # kaba sözdizimi denetimi: süslü parantezler dengeli
     code = re.sub(r"'[^'\r\n]*'", "''", text)
     assert code.count("{") == code.count("}")
+
+
+def test_installer_scripts():
+    root = PS1.parent
+    import re
+    for name in ("Kur.ps1", "Kaldir.ps1"):
+        raw = (root / name).read_bytes()
+        assert raw.isascii(), f"{name} ASCII olmalı (irm | iex ve PS 5.1 kod sayfası)"
+        code = re.sub(r"'[^'\r\n]*'", "''", raw.decode())
+        assert code.count("{") == code.count("}"), name
+    kur = (root / "Kur.ps1").read_text()
+    listed = re.search(r"\$files = @\((.*?)\)", kur, re.S).group(1)
+    for f in re.findall(r"'([^']+)'", listed):
+        assert (root / f).is_file(), f"Kur.ps1 indiriyor ama depoda yok: {f}"
+    assert "ProgramFiles" in kur and "Uninstall" in kur

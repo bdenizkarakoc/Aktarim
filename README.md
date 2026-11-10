@@ -12,7 +12,16 @@ PowerShell'i aç, şunu yapıştır:
 irm https://raw.githubusercontent.com/bdenizkarakoc/Aktarim/main/Kur.ps1 | iex
 ```
 
-Dosyalar `%LOCALAPPDATA%\Aktarim` klasörüne iner, masaüstüne **Aktarım** kısayolu konur ve program açılır.
+Yönetici izni sorulur (Evet de). Kurulum:
+
+- Programı **`C:\Program Files\Aktarim`** klasörüne kurar,
+- **Başlat menüsüne** ve **masaüstüne** *Aktarım* kısayolu koyar (kendi simgesiyle),
+- sağ tık → **Gönder** → *Telefona gönder (Aktarım)* seçeneğini ekler,
+- telefonun bağlanabilmesi için güvenlik duvarına izin verir (yalnızca özel ağ, TCP 8765),
+- **Ayarlar → Uygulamalar** listesine ekler; oradan *Kaldır* ile kaldırılır.
+
+Aynı satırı yeniden çalıştırmak programı günceller. Telefonla aktarılan dosyalar program klasöründe değil,
+`Masaüstü\Aktarım` klasöründe durur; kaldırınca silinmez.
 
 ## Elle başlatma
 
